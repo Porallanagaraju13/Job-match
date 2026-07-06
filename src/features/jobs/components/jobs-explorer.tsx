@@ -1,0 +1,394 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Bookmark,
+  Check,
+  CheckCircle2,
+  ClipboardCheck,
+  Clock3,
+  ExternalLink,
+  LoaderCircle,
+  MapPin,
+  Search,
+  Wifi,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { useSavedJobs } from "@/features/jobs/use-saved-jobs";
+import type { Job, JobSource, ProfileDraft } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+const platformDetails: Array<{ source: string; mark: string }> = [
+  { source: "Naukri", mark: "N" },
+  { source: "Instahyre", mark: "I" },
+  { source: "IIMJobs", mark: "IIM" },
+  { source: "Hirist", mark: "H" },
+  { source: "Foundit", mark: "F" },
+  { source: "Wellfound", mark: "W:" },
+];
+
+function profileScore(profile: ProfileDraft, hasResume: boolean) {
+  const checks = [
+    Boolean(profile.fullName && profile.email && profile.phone && profile.location),
+    Boolean(profile.summary),
+    Boolean(profile.headline),
+    Boolean(profile.education.length > 0),
+    profile.skills.length > 0,
+    hasResume,
+  ];
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
+}
+
+export function JobsExplorer({
+  jobs,
+  profile,
+  hasResume,
+}: {
+  jobs: Job[];
+  profile: ProfileDraft;
+  hasResume: boolean;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { isSaved, toggleSaved } = useSavedJobs();
+  const [query, setQuery] = useState("");
+  const [sources, setSources] = useState<JobSource[]>(platformDetails.map((item) => item.source));
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [starting, setStarting] = useState(false);
+  const completeness = profileScore(profile, hasResume);
+
+  const visibleJobs = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return jobs
+      .filter((job) => sources.includes(job.source))
+      .filter(
+        (job) =>
+          !normalizedQuery ||
+          [job.title, job.company, job.location, ...job.tags]
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedQuery),
+      )
+      .sort((a, b) => b.matchScore - a.matchScore);
+  }, [jobs, query, sources]);
+
+  function toggleSource(source: JobSource) {
+    setSources((current) =>
+      current.includes(source) ? current.filter((item) => item !== source) : [...current, source],
+    );
+  }
+
+  function applyManually() {
+    if (!selectedJob) return;
+    if (!selectedJob.applyUrl) {
+      console.warn('No apply URL available for job:', selectedJob);
+      return;
+    }
+    try {
+      // Ensure URL has a protocol for window.open
+      const url = selectedJob.applyUrl.startsWith('http')
+        ? selectedJob.applyUrl
+        : `https://${selectedJob.applyUrl}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error('Failed to open application URL:', err);
+    }
+    setSelectedJob(null);
+  }
+
+  async function applyAutomatically() {
+    if (!selectedJob) return;
+    setStarting(true);
+    const response = await fetch("/api/applications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId: selectedJob.id }),
+    });
+    const payload = (await response.json().catch(() => null)) as { id?: string } | null;
+    setStarting(false);
+    setSelectedJob(null);
+    const parameters = new URLSearchParams({
+      started: payload?.id ?? "app_preview",
+      role: selectedJob.title,
+      company: selectedJob.company,
+      source: selectedJob.source,
+    });
+    if (searchParams.get("demo") === "1") {
+      parameters.set("demo", "1");
+    }
+    router.push(`/app/applications?${parameters.toString()}`);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="min-w-0 space-y-7">
+          <section>
+            <h3 className="font-heading text-xl font-semibold">Job Platforms</h3>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {platformDetails.map((platform) => {
+                const active = sources.includes(platform.source);
+                return (
+                  <button
+                    key={platform.source}
+                    type="button"
+                    onClick={() => toggleSource(platform.source)}
+                    className={cn(
+                      "relative flex cursor-pointer items-center gap-3 rounded-xl border bg-white p-4 text-left transition-colors duration-200",
+                      active
+                        ? "border-emerald-300 bg-emerald-50/70"
+                        : "border-border text-muted-foreground hover:border-slate-300 hover:bg-slate-50 hover:text-foreground",
+                    )}
+                  >
+                    {active && (
+                      <span className="absolute -right-2 -top-2 grid size-6 place-items-center rounded-full border border-emerald-200 bg-white text-emerald-700">
+                        <Check className="size-4" strokeWidth={3} />
+                      </span>
+                    )}
+                    <span className="grid size-11 place-items-center rounded-md border bg-white font-black text-emerald-700">
+                      {platform.mark}
+                    </span>
+                    <span>
+                      <span className="block font-semibold">{platform.source}</span>
+                      <span className="block text-xs text-muted-foreground">Job board</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="font-heading text-xl font-semibold">Top Job Matches</h3>
+              <div className="relative w-full sm:max-w-sm">
+                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  id="search-jobs"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="h-11 bg-white pl-9"
+                  placeholder="Search jobs..."
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {visibleJobs.map((job) => {
+                const saved = isSaved(job.id);
+                return (
+                  <Card key={job.id} className="p-5 transition-colors hover:border-slate-300">
+                    <div className="grid gap-5 lg:grid-cols-[64px_minmax(0,1fr)_190px_150px] lg:items-center">
+                      <span className="grid size-14 place-items-center rounded-lg border bg-slate-50 text-lg font-semibold text-slate-700">
+                        {job.companyInitial}
+                      </span>
+
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/app/jobs/${job.id}`}
+                            className="font-heading text-lg font-semibold hover:text-emerald-700"
+                          >
+                            {job.title}
+                          </Link>
+                          <Badge variant="outline" className="gap-1 rounded-md text-[10px]">
+                            {job.source}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">{job.company}</p>
+                        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            {job.workMode === "Remote" ? (
+                              <Wifi className="size-3.5" />
+                            ) : (
+                              <MapPin className="size-3.5" />
+                            )}
+                            {job.workMode}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <MapPin className="size-3.5" />
+                            {job.location}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-emerald-700">{job.matchScore}% Match</span>
+                        </div>
+                        <Progress value={job.matchScore} className="mt-2 h-1.5" />
+                        <p className="mt-2 text-xs font-medium text-emerald-700">
+                          {job.matchScore >= 90 ? "High fit" : "Good fit"}
+                        </p>
+                        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock3 className="size-3" />
+                          Posted {job.postedLabel}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Button className="font-semibold" onClick={() => setSelectedJob(job)}>
+                          Apply Now
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => toggleSaved(job.id)}
+                          aria-pressed={saved}
+                        >
+                          <Bookmark className={cn("size-4", saved && "fill-current")} />
+                          {saved ? "Saved" : "Save"}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+
+              {visibleJobs.length === 0 && (
+                <Card className="py-16 text-center">
+                  <Search className="mx-auto size-8 text-muted-foreground" />
+                  <p className="mt-4 font-heading text-lg font-bold">No matching jobs</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Select another platform or clear the search.
+                  </p>
+                </Card>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-5">
+          <Card className="p-6">
+            <h3 className="font-heading text-xl font-semibold">Profile Completeness</h3>
+            <div className="mt-6 flex items-center gap-5">
+              <div
+                className="grid size-28 shrink-0 place-items-center rounded-full"
+                style={{
+                  background: `conic-gradient(#059669 ${completeness * 3.6}deg, #e2e8f0 0deg)`,
+                }}
+              >
+                <div className="grid size-20 place-items-center rounded-full bg-white text-center">
+                  <span>
+                    <span className="block text-2xl font-semibold text-emerald-700">
+                      {completeness}%
+                    </span>
+                    <span className="block text-[10px] text-muted-foreground">Complete</span>
+                  </span>
+                </div>
+              </div>
+              <div>
+                <p className="font-bold">
+                  {completeness === 100 ? "Profile complete" : "Complete your profile"}
+                </p>
+                <p className="mt-2 text-sm leading-5 text-muted-foreground">
+                  {completeness === 100
+                    ? "Your profile is complete and ready for applications."
+                    : "Add the remaining details for stronger applications."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-3 border-t pt-5 text-sm">
+              {[
+                ["Basic Information", Boolean(profile.fullName && profile.email && profile.phone && profile.location)],
+                ["Summary", Boolean(profile.summary)],
+                ["Work Experience", Boolean(profile.headline)],
+                ["Education", Boolean(profile.education.length > 0)],
+                ["Skills", profile.skills.length > 0],
+                ["Resume", hasResume],
+              ].map(([label, done]) => (
+                <div key={String(label)} className="flex items-center gap-2">
+                  <CheckCircle2
+                    className={cn("size-4", done ? "text-emerald-600" : "text-muted-foreground/35")}
+                  />
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+
+            <Button render={<Link href="/app/profile" />} className="mt-6 w-full font-semibold">
+              Improve Profile
+            </Button>
+          </Card>
+
+          <Card className="p-6">
+            <h3 className="flex items-center gap-2 font-heading text-lg font-semibold">
+              <Clock3 className="size-4" />
+              Recent Activity
+            </h3>
+            <div className="mt-5 space-y-4 text-sm">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Recently matched
+                </p>
+                <p className="mt-2 font-semibold">{jobs[0]?.title ?? "Your next role"}</p>
+                <p className="text-xs text-muted-foreground">{jobs[0]?.company ?? "JobMatch"}</p>
+              </div>
+              <div className="border-t pt-4">
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <ClipboardCheck className="size-4" />
+                  Ready to prepare applications
+                </p>
+              </div>
+            </div>
+          </Card>
+        </aside>
+      </div>
+
+      <Dialog open={Boolean(selectedJob)} onOpenChange={(open) => !open && setSelectedJob(null)}>
+        <DialogContent className="max-w-[590px] rounded-xl p-8">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">How would you like to apply?</DialogTitle>
+            <DialogDescription className="text-base leading-6">
+              Apply manually in your browser, or prepare this application from your saved profile
+              details for {selectedJob?.title}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-3 grid gap-3">
+            <button
+              type="button"
+              onClick={applyManually}
+              className="flex cursor-pointer items-center gap-4 rounded-xl border bg-white p-5 text-left transition-colors hover:bg-muted/60"
+            >
+              <ExternalLink className="size-6" />
+              <span>
+                <span className="block font-bold">Apply Manually</span>
+                <span className="mt-1 block text-sm text-muted-foreground">
+                  Open the job application URL in a new tab
+                </span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={applyAutomatically}
+              disabled={starting}
+              className="flex cursor-pointer items-center gap-4 rounded-xl bg-primary p-5 text-left text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-70"
+            >
+              {starting ? <LoaderCircle className="size-6 animate-spin" /> : <ClipboardCheck className="size-6" />}
+              <span>
+                <span className="block font-semibold">Prepare application</span>
+                <span className="mt-1 block text-sm opacity-70">
+                  Prepare the application using your saved profile details
+                </span>
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
