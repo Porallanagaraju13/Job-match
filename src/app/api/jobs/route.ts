@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { discoverJobPages } from "@/server/jobs/firecrawl";
+import { discoverDirectProviderJobs } from "@/server/jobs/direct-providers";
 import { GreenhouseAdapter } from "@/server/jobs/greenhouse";
 import { LeverAdapter } from "@/server/jobs/lever";
+import { scoreJob, type MatchProfile } from "@/server/matching/score-job";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -13,13 +14,39 @@ export async function GET(request: Request) {
 
   if (query) {
     try {
-      const discoveries = await discoverJobPages(query, {
-        location: url.searchParams.get("location") ?? undefined,
+      const location = url.searchParams.get("location") ?? "Remote";
+      const skills = url.searchParams.get("skills")?.split(",").map((skill) => skill.trim()).filter(Boolean) ?? [];
+      const jobs = await discoverDirectProviderJobs({
+        roleQuery: query,
+        locationQuery: location,
+        skills,
       });
-      return NextResponse.json({ mode: process.env.FIRECRAWL_API_KEY ? "firecrawl" : "demo", discoveries });
+      const matchProfile: MatchProfile = {
+        skills,
+        targetRoles: [query],
+        preferredLocations: [location],
+        workModes: ["Remote", "Hybrid", "On-site"],
+        seniorityLevels: ["Senior", "Lead", "Mid", "Junior"],
+      };
+      const matches = jobs
+        .map((job) => ({
+          ...job,
+          matchScore: scoreJob(matchProfile, {
+            title: job.title,
+            description: job.description,
+            tags: [],
+            location: job.location,
+            workMode: job.workMode,
+            postedAt: job.postedAt ?? undefined,
+          }).score,
+        }))
+        .filter((job) => job.matchScore >= 35)
+        .sort((left, right) => right.matchScore - left.matchScore)
+        .slice(0, 50);
+      return NextResponse.json({ mode: "direct-providers", jobs: matches });
     } catch {
       return NextResponse.json(
-        { error: "Job discovery is temporarily unavailable.", provider: "firecrawl" },
+        { error: "Job discovery is temporarily unavailable.", provider: "direct-providers" },
         { status: 502 },
       );
     }

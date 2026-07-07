@@ -2,6 +2,7 @@ import "server-only";
 
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
+import { extractProfileFromText } from "@/server/resumes/text-profile";
 
 export const extractedProfileSchema = z.object({
   fullName: z.string().default(""),
@@ -184,38 +185,61 @@ export async function extractProfileFromResume({
   originalName,
   bytes,
   mimeType,
+  textHint,
 }: {
   originalName: string;
   bytes?: Uint8Array;
   mimeType?: string;
+  textHint?: string;
 }): Promise<ExtractedProfile> {
-  if (!process.env.GEMINI_API_KEY || !bytes?.length || !mimeType) {
+  const localDraft =
+    textHint && textHint.trim().length > 80 ? extractProfileFromText(textHint, originalName) : null;
+
+  if (!process.env.GEMINI_API_KEY) {
+    return localDraft ?? fallbackProfile(originalName);
+  }
+
+  if (!localDraft && (!bytes?.length || !mimeType)) {
     return fallbackProfile(originalName);
   }
 
   try {
     const ai = getGenAIClient(); // Reuse existing client instead of creating new one each time
+    const contentParts = localDraft
+      ? [
+          {
+            text: [
+              "Extract a factual candidate profile from this resume text.",
+              "The text was already extracted locally from the uploaded file.",
+              "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
+              "Use empty strings, empty arrays, or null dates when evidence is absent.",
+              "Keep experience descriptions concise and faithful to the document.",
+              `Resume text:\n${textHint!.slice(0, 60_000)}`,
+            ].join(" "),
+          },
+        ]
+      : [
+          {
+            inlineData: {
+              data: Buffer.from(bytes!).toString("base64"),
+              mimeType: mimeType!,
+            },
+          },
+          {
+            text: [
+              "Extract a factual candidate profile from this resume.",
+              "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
+              "Use empty strings, empty arrays, or null dates when evidence is absent.",
+              "Keep experience descriptions concise and faithful to the document.",
+            ].join(" "),
+          },
+        ];
     const response = await ai.models.generateContent({
       model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
       contents: [
         {
           role: "user",
-          parts: [
-            {
-              inlineData: {
-                data: Buffer.from(bytes).toString("base64"),
-                mimeType,
-              },
-            },
-            {
-              text: [
-                "Extract a factual candidate profile from this resume.",
-                "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
-                "Use empty strings, empty arrays, or null dates when evidence is absent.",
-                "Keep experience descriptions concise and faithful to the document.",
-              ].join(" "),
-            },
-          ],
+          parts: contentParts,
         },
       ],
       config: {
@@ -230,6 +254,6 @@ export async function extractProfileFromResume({
     // Log error for debugging while maintaining fallback behavior
     console.error("Error extracting profile from resume:", error);
     // Provider failure must not block onboarding; the UI still requires human review.
-    return fallbackProfile(originalName);
+    return localDraft ?? fallbackProfile(originalName);
   }
 }

@@ -4,6 +4,7 @@ import { LeverAdapter } from "@/server/jobs/lever";
 import type { JobSourceAdapter } from "@/server/jobs/source-adapter";
 import { inngest } from "@/server/inngest/client";
 import { extractProfileFromResume } from "@/server/resumes/extract-profile";
+import { extractResumeText } from "@/server/resumes/text-extraction";
 import { createServiceRoleClient } from "@/server/supabase/server";
 
 export const processResume = inngest.createFunction(
@@ -35,10 +36,17 @@ export const processResume = inngest.createFunction(
         .from("resumes")
         .download(resume.storage_path);
       if (downloadError || !file) throw downloadError ?? new Error("Resume download failed");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const textHint = extractResumeText({
+        originalName,
+        bytes,
+        mimeType: resume.mime_type,
+      });
       return extractProfileFromResume({
         originalName,
-        bytes: new Uint8Array(await file.arrayBuffer()),
+        bytes,
         mimeType: resume.mime_type,
+        textHint,
       });
     });
 
@@ -49,7 +57,7 @@ export const processResume = inngest.createFunction(
       const { error: extractionError } = await supabase.from("resume_extractions").insert({
         user_id: userId,
         resume_id: resumeId,
-        parser_version: "fallback-v1",
+        parser_version: "gemini-v1",
         raw_data: extraction,
         confidence_map: extraction.confidence,
       });

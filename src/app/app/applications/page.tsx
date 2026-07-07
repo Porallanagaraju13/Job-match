@@ -56,5 +56,8 @@ export default async function ApplicationsPage({
 }
 
 function sourceName(value: string | undefined): string {
-  return value ?? "Unknown";
+  if (!value || value === "undefined" || value === "null" || value === "Unknown") {
+    return "Company Careers";
+  }
+  return value;
 }

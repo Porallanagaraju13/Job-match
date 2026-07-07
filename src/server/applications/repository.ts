@@ -17,7 +17,12 @@ function uiState(value: string): ApplicationState {
 }
 
 function sourceName(value: unknown): string {
-  return String(value);
+  if (typeof value !== "string") return "Company Careers";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "undefined" || trimmed === "null" || trimmed === "Unknown") {
+    return "Company Careers";
+  }
+  return trimmed;
 }
 
 export async function getApplicationsForCurrentUser(): Promise<Application[]> {

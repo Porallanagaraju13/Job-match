@@ -182,8 +182,8 @@ export async function upsertProfileFromExtraction(
     );
   }
 
-  await supabase.from("experiences").delete().eq("user_id", userId);
   if (data.experiences.length) {
+    await supabase.from("experiences").delete().eq("user_id", userId);
     await supabase.from("experiences").insert(
       data.experiences.map((experience, position) => ({
         user_id: userId,
@@ -198,8 +198,8 @@ export async function upsertProfileFromExtraction(
     );
   }
 
-  await supabase.from("educations").delete().eq("user_id", userId);
   if (data.education.length) {
+    await supabase.from("educations").delete().eq("user_id", userId);
     await supabase.from("educations").insert(
       data.education.map((education, position) => ({
         user_id: userId,

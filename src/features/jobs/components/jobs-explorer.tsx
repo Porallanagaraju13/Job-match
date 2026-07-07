@@ -31,22 +31,39 @@ import { useSavedJobs } from "@/features/jobs/use-saved-jobs";
 import type { Job, JobSource, ProfileDraft } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const platformDetails: Array<{ source: string; mark: string }> = [
-  { source: "Naukri", mark: "N" },
-  { source: "Instahyre", mark: "I" },
-  { source: "IIMJobs", mark: "IIM" },
-  { source: "Hirist", mark: "H" },
-  { source: "Foundit", mark: "F" },
-  { source: "Wellfound", mark: "W:" },
+const platformDetails: Array<{ source: string; label?: string; mark: string; description: string }> = [
+  { source: "LinkedIn", mark: "IN", description: "Professional network" },
+  { source: "Indeed", mark: "ID", description: "Job search engine" },
+  { source: "Naukri", mark: "N", description: "Popular India jobs" },
+  { source: "Glassdoor", mark: "G", description: "Company reviews & jobs" },
+  { source: "Foundit", mark: "F", description: "Job board" },
+  { source: "Instahyre", mark: "I", description: "Tech hiring platform" },
+  { source: "Wellfound", mark: "W", description: "Startup jobs" },
+  { source: "RemoteOK", mark: "RO", description: "Remote jobs" },
+  { source: "Remotive", mark: "R", description: "Remote jobs" },
+  { source: "Arbeitnow", mark: "AN", description: "International jobs" },
+  { source: "Greenhouse", label: "Company Careers", mark: "GH", description: "Company career pages" },
+  { source: "Lever", label: "Company Careers", mark: "LV", description: "Company career pages" },
+  { source: "Career Page", label: "Company Careers", mark: "CP", description: "Direct openings" },
+  { source: "IIMJobs", mark: "IIM", description: "Management jobs" },
+  { source: "Hirist", mark: "H", description: "Tech jobs" },
 ];
 
+function readableSource(source: string) {
+  if (!source || source === "undefined" || source === "null" || source === "Unknown") {
+    return "Company Careers";
+  }
+  return source;
+}
+
 function sourceMark(source: string) {
+  const readable = readableSource(source);
   const letters = source
     .split(/[^a-z0-9]+/i)
     .filter(Boolean)
     .map((part) => part[0])
     .join("");
-  return (letters || source).slice(0, 3).toUpperCase();
+  return (letters || readable).slice(0, 3).toUpperCase();
 }
 
 function profileScore(profile: ProfileDraft, hasResume: boolean) {
@@ -82,7 +99,12 @@ export function JobsExplorer({
     const details = new Map(platformDetails.map((platform) => [platform.source, platform]));
     for (const job of jobs) {
       if (!details.has(job.source)) {
-        details.set(job.source, { source: job.source, mark: sourceMark(job.source) });
+        details.set(job.source, {
+          source: job.source,
+          label: readableSource(job.source),
+          mark: sourceMark(job.source),
+          description: "Live job source",
+        });
       }
     }
     return Array.from(details.values());
@@ -188,8 +210,8 @@ export function JobsExplorer({
                       {platform.mark}
                     </span>
                     <span>
-                      <span className="block font-semibold">{platform.source}</span>
-                      <span className="block text-xs text-muted-foreground">Job board</span>
+                      <span className="block font-semibold">{platform.label ?? readableSource(platform.source)}</span>
+                      <span className="block text-xs text-muted-foreground">{platform.description}</span>
                     </span>
                   </button>
                 );

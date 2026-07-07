@@ -2,6 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { inngest } from "@/server/inngest/client";
 import { extractProfileFromResume } from "@/server/resumes/extract-profile";
+import { extractProfileFromText } from "@/server/resumes/text-profile";
+import { extractResumeText } from "@/server/resumes/text-extraction";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
 const allowedMimeTypes = new Set([
@@ -54,11 +56,12 @@ export async function POST(request: Request) {
 
   if (!supabase) {
     const id = randomUUID();
-    const extraction = await extractProfileFromResume({
-      originalName: file.name,
+    const resumeText = extractResumeText({
       bytes,
       mimeType: file.type || "application/pdf",
+      originalName: file.name,
     });
+    const extraction = extractProfileFromText(resumeText, file.name);
     return NextResponse.json({
       id,
       mode: "demo",
@@ -101,27 +104,42 @@ export async function POST(request: Request) {
 
   await supabase.from("profiles").update({ onboarding_state: "processing" }).eq("id", user.id);
 
+  const resumeText = extractResumeText({ bytes, mimeType, originalName: file.name });
+  const localExtraction = extractProfileFromText(resumeText, file.name);
+  await supabase.from("resume_extractions").insert({
+    user_id: user.id,
+    resume_id: resumeId,
+    parser_version: "local-text-v1",
+    raw_data: localExtraction,
+    confidence_map: localExtraction.confidence,
+  });
+
+  const { upsertProfileFromExtraction } = await import("@/server/profile/repository");
+  await upsertProfileFromExtraction(supabase, user.id, localExtraction);
+  await supabase.from("resumes").update({ status: "review_required" }).eq("id", resumeId);
+  await supabase.from("profiles").update({ onboarding_state: "review_required" }).eq("id", user.id);
+
   if (process.env.INNGEST_EVENT_KEY) {
     await inngest.send({
       name: "jobbuddy/resume.uploaded",
-      data: { resumeId, userId: user.id, originalName: file.name },
+      data: { resumeId, userId: user.id, originalName: file.name, textLength: resumeText.length },
     });
   } else {
     const extraction = await extractProfileFromResume({
       originalName: file.name,
       bytes,
       mimeType,
+      textHint: resumeText,
     });
     await supabase.from("resume_extractions").insert({
       user_id: user.id,
       resume_id: resumeId,
-      parser_version: "fallback-v1",
+      parser_version: "gemini-v1",
       raw_data: extraction,
       confidence_map: extraction.confidence,
     });
     
     // Automatically map extracted data to profile
-    const { upsertProfileFromExtraction } = await import("@/server/profile/repository");
     await upsertProfileFromExtraction(supabase, user.id, extraction);
 
     await supabase.from("resumes").update({ status: "review_required" }).eq("id", resumeId);

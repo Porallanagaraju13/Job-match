@@ -1,9 +1,11 @@
 import "server-only";
 
-import { GoogleGenAI } from "@google/genai";
 import { createHash, randomUUID } from "node:crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { discoverDirectProviderJobs } from "@/server/jobs/direct-providers";
 import { discoverJobPages, type FirecrawlJobDiscoveryResult } from "@/server/jobs/firecrawl";
-import { scoreJob, type MatchProfile } from "@/server/matching/score-job";
+import { inferWorkMode, type NormalizedSourceJob } from "@/server/jobs/source-adapter";
+import { scoreJob, type MatchProfile, type MatchResult } from "@/server/matching/score-job";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/server/supabase/server";
 
 function normalize(value: string) {
@@ -18,19 +20,17 @@ function asString(value: unknown, fallback: string) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
 function hostname(value: string) {
   try {
     return new URL(value).hostname.replace(/^www\./, "");
   } catch {
     return null;
-  }
-}
-
-function pathSegments(value: string) {
-  try {
-    return new URL(value).pathname.split("/").filter(Boolean);
-  } catch {
-    return [];
   }
 }
 
@@ -48,17 +48,13 @@ function platformFromUrl(value: string) {
   if (host.includes("hirist.tech") || host.includes("hirist.com")) return "Hirist";
   if (host.includes("foundit.in")) return "Foundit";
   if (host.includes("wellfound.com") || host.includes("angel.co")) return "Wellfound";
-  return "Unknown";
+  if (host.includes("greenhouse.io")) return "Greenhouse";
+  if (host.includes("lever.co")) return "Lever";
+  return "Career Page";
 }
 
 function companyFromUrl(value: string) {
   const host = hostname(value) ?? "";
-  const segments = pathSegments(value);
-
-  if ((host.includes("wellfound.com") || host.includes("angel.co")) && segments[1]) {
-    return titleCase(segments[1]);
-  }
-
   return titleCase(host.split(".").filter(Boolean)[0] ?? "Unknown");
 }
 
@@ -72,7 +68,7 @@ function roleTitleFromSearchResult(result: FirecrawlJobDiscoveryResult, companyN
     .trim();
 
   const parts = rawTitle
-    .split(/\s+[|–—-]\s+/)
+    .split(/\s+[-|–—]\s+/)
     .map((part) => part.trim())
     .filter(Boolean);
 
@@ -84,17 +80,9 @@ function fingerprintFor(parts: string[]) {
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
-function workModeFrom(description: string, locationQuery: string) {
-  const haystack = `${description} ${locationQuery}`.toLowerCase();
-  if (haystack.includes("remote")) return "Remote";
-  if (haystack.includes("hybrid")) return "Hybrid";
-  return "On-site";
-}
-
-function stringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : [];
+function sourceUrlFor(canonicalUrl: string) {
+  const host = hostname(canonicalUrl);
+  return host ? `https://${host}` : canonicalUrl;
 }
 
 function isLegacyDemoProfile(value: {
@@ -109,9 +97,188 @@ function isLegacyDemoProfile(value: {
   );
 }
 
-function sourceUrlFor(canonicalUrl: string) {
-  const host = hostname(canonicalUrl);
-  return host ? `https://${host}` : canonicalUrl;
+function inferRoleFromSkills(skills: string[]) {
+  const lowerSkills = skills.map((skill) => skill.toLowerCase());
+  if (lowerSkills.some((skill) => ["react", "next.js", "typescript", "javascript"].includes(skill))) {
+    return "Frontend Developer";
+  }
+  if (lowerSkills.some((skill) => ["node.js", "express", "postgresql", "mongodb"].includes(skill))) {
+    return "Backend Developer";
+  }
+  if (lowerSkills.some((skill) => ["python", "machine learning", "deep learning", "llm"].includes(skill))) {
+    return "AI Engineer";
+  }
+  if (lowerSkills.some((skill) => ["data analysis", "power bi", "tableau", "sql"].includes(skill))) {
+    return "Data Analyst";
+  }
+  if (lowerSkills.some((skill) => ["seo", "google ads", "digital marketing", "content marketing"].includes(skill))) {
+    return "Digital Marketing Specialist";
+  }
+  return "Software Engineer";
+}
+
+function firecrawlToProviderJob(
+  discovery: FirecrawlJobDiscoveryResult,
+  locationQuery: string,
+): NormalizedSourceJob {
+  const company = companyFromUrl(discovery.url);
+  const description = discovery.description || "View the original posting for details.";
+  return {
+    source: platformFromUrl(discovery.url),
+    externalId: `firecrawl-${fingerprintFor([discovery.url, discovery.title])}`,
+    company,
+    title: roleTitleFromSearchResult(discovery, company),
+    description,
+    location: locationQuery,
+    workMode: inferWorkMode(locationQuery, description),
+    employmentType: "Full-time",
+    applyUrl: discovery.url,
+    postedAt: new Date().toISOString(),
+    sourceUpdatedAt: null,
+    raw: discovery,
+  };
+}
+
+function scoreProviderJob(matchProfile: MatchProfile, job: NormalizedSourceJob) {
+  return scoreJob(matchProfile, {
+    title: job.title,
+    description: job.description,
+    tags: [],
+    location: job.location,
+    workMode: job.workMode,
+    postedAt: job.postedAt ?? undefined,
+  });
+}
+
+async function saveMatchedJob({
+  supabase,
+  userId,
+  job,
+  match,
+  roleQuery,
+  skills,
+}: {
+  supabase: SupabaseClient;
+  userId: string;
+  job: NormalizedSourceJob;
+  match: MatchResult;
+  roleQuery: string;
+  skills: string[];
+}) {
+  const sourceDomain = hostname(job.applyUrl);
+  const sourceUrl = sourceUrlFor(job.applyUrl);
+  const normalizedCompany = normalize(job.company) || "unknown";
+
+  const { data: companyRow } = await supabase
+    .from("companies")
+    .select("id")
+    .eq("normalized_name", normalizedCompany)
+    .maybeSingle();
+
+  let companyId = companyRow?.id;
+  if (!companyId) {
+    companyId = randomUUID();
+    const { error } = await supabase.from("companies").insert({
+      id: companyId,
+      name: job.company,
+      normalized_name: normalizedCompany,
+      domain: sourceDomain,
+      careers_url: sourceUrl,
+    });
+    if (error) return { error: `Could not save company: ${error.message}` };
+  }
+
+  const { data: sourceRow } = await supabase
+    .from("job_sources")
+    .select("id")
+    .eq("platform", job.source)
+    .eq("source_url", sourceUrl)
+    .maybeSingle();
+
+  let sourceId = sourceRow?.id;
+  if (!sourceId) {
+    sourceId = randomUUID();
+    const { error } = await supabase.from("job_sources").insert({
+      id: sourceId,
+      company_id: companyId,
+      platform: job.source,
+      source_url: sourceUrl,
+      status: "active",
+      last_synced_at: new Date().toISOString(),
+      last_success_at: new Date().toISOString(),
+      metadata: { provider: job.source },
+    });
+    if (error) return { error: `Could not save job source: ${error.message}` };
+  }
+
+  const externalId = job.externalId || fingerprintFor([job.source, job.company, job.title, job.applyUrl]);
+  const { data: existingJob } = await supabase
+    .from("jobs")
+    .select("id")
+    .eq("source_id", sourceId)
+    .eq("external_id", externalId)
+    .maybeSingle();
+
+  const now = new Date().toISOString();
+  const tags = Array.from(new Set([job.source, roleQuery, ...skills.slice(0, 6)])).filter(Boolean);
+  let jobId = existingJob?.id;
+  if (!jobId) {
+    jobId = randomUUID();
+    const { error } = await supabase.from("jobs").insert({
+      id: jobId,
+      source_id: sourceId,
+      external_id: externalId,
+      title: job.title,
+      normalized_title: normalize(job.title) || "open-role",
+      description: job.description,
+      locations: [job.location],
+      work_mode: job.workMode,
+      employment_type: job.employmentType,
+      seniority: "Level not specified",
+      apply_url: job.applyUrl,
+      canonical_url: job.applyUrl,
+      tags,
+      posted_at: job.postedAt ?? now,
+      source_updated_at: job.sourceUpdatedAt,
+      company_id: companyId,
+      source_payload: job.raw,
+      fingerprint: fingerprintFor([job.source, job.company, job.title, job.applyUrl]),
+      last_seen_at: now,
+    });
+    if (error) return { error: `Could not save fetched job: ${error.message}` };
+  } else {
+    await supabase
+      .from("jobs")
+      .update({
+        title: job.title,
+        description: job.description,
+        locations: [job.location],
+        work_mode: job.workMode,
+        apply_url: job.applyUrl,
+        tags,
+        closed_at: null,
+        last_seen_at: now,
+      })
+      .eq("id", jobId);
+  }
+
+  const explanation = match.reasons.length
+    ? match.reasons
+    : [`Matched your target role: ${roleQuery}`];
+
+  const { error: matchError } = await supabase.from("job_matches").upsert(
+    {
+      user_id: userId,
+      job_id: jobId,
+      score: Math.min(100, Math.max(1, match.score)),
+      components: match.components,
+      explanation,
+    },
+    { onConflict: "user_id,job_id" },
+  );
+  if (matchError) return { error: `Could not save job match: ${matchError.message}` };
+
+  return { success: true };
 }
 
 export async function fetchCloudJobsForUser(userId: string) {
@@ -154,15 +321,11 @@ export async function fetchCloudJobsForUser(userId: string) {
   const preferredLocations = stringArray(preferences?.preferred_locations);
   const workModes = stringArray(preferences?.work_modes);
   const seniorityLevels = stringArray(preferences?.seniority_levels);
-
   const roleQuery =
-    targetRoles.length > 0 || !usesLegacyDemoProfile
-      ? targetRoles[0] ?? asString(profile.headline, "Software Engineer")
-      : "Software Engineer";
+    targetRoles[0] ??
+    (usesLegacyDemoProfile ? "Software Engineer" : asString(profile.headline, inferRoleFromSkills(profileSkills)));
   const locationQuery =
     preferredLocations[0] ?? (usesLegacyDemoProfile ? "Remote" : asString(profile.location, "Remote"));
-  const skillQuery = profileSkills.slice(0, 4).join(" ");
-  const searchQuery = [roleQuery, skillQuery].filter(Boolean).join(" ");
   const matchProfile: MatchProfile = {
     skills: profileSkills,
     targetRoles: targetRoles.length ? targetRoles : [roleQuery],
@@ -173,182 +336,57 @@ export async function fetchCloudJobsForUser(userId: string) {
       typeof preferences?.minimum_salary === "number" ? preferences.minimum_salary : undefined,
   };
 
-  if (!process.env.FIRECRAWL_API_KEY) {
-    return { error: "FIRECRAWL_API_KEY not configured" };
+  const directJobs = await discoverDirectProviderJobs({
+    roleQuery,
+    locationQuery,
+    skills: profileSkills,
+  });
+
+  let providerJobs = directJobs;
+  if (providerJobs.length < 8 && process.env.FIRECRAWL_API_KEY) {
+    try {
+      const discoveries = await discoverJobPages([roleQuery, ...profileSkills.slice(0, 3)].join(" "), {
+        location: locationQuery,
+      });
+      providerJobs = [
+        ...providerJobs,
+        ...discoveries.map((discovery) => firecrawlToProviderJob(discovery, locationQuery)),
+      ];
+    } catch {
+      // Direct provider results are still useful; Firecrawl is only a fallback.
+    }
   }
 
-  let discoveries: FirecrawlJobDiscoveryResult[];
-  try {
-    discoveries = await discoverJobPages(searchQuery, { location: locationQuery });
-  } catch {
-    return { error: "Could not reach Firecrawl. Check the key and network, then try again." };
+  if (!providerJobs.length) {
+    return {
+      error:
+        "No live openings were found from direct providers for this profile. Add more target roles or skills, then try again.",
+    };
   }
 
-  if (!discoveries.length) {
-    return { error: "No jobs found from Firecrawl for this profile yet." };
-  }
-
-  const geminiApiKey = process.env.GEMINI_API_KEY;
-  const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
+  const scoredJobs = providerJobs
+    .map((job) => ({ job, match: scoreProviderJob(matchProfile, job) }))
+    .sort((left, right) => right.match.score - left.match.score);
+  const relevantJobs = scoredJobs.filter(({ match }) => match.score >= 35);
+  const jobsToSave = (relevantJobs.length ? relevantJobs : scoredJobs).slice(0, 20);
 
   let added = 0;
-  const fetchLimit = Math.floor(Math.random() * (8 - 5 + 1)) + 5;
-  for (const discovery of discoveries.slice(0, fetchLimit)) {
-    const canonicalUrl = discovery.url;
-    const platform = platformFromUrl(canonicalUrl);
-    const sourceDomain = hostname(canonicalUrl);
-    const sourceUrl = sourceUrlFor(canonicalUrl);
-    const companyName = companyFromUrl(canonicalUrl);
-    const title = roleTitleFromSearchResult(discovery, companyName);
-    const description = discovery.description || "View the original posting for details.";
-    const externalId = fingerprintFor([platform, companyName, title, canonicalUrl]);
-    const workMode = workModeFrom(description, locationQuery);
-    const deterministicMatch = scoreJob(matchProfile, {
-      title,
-      description,
-      tags: [platform, ...profileSkills.slice(0, 6)],
-      location: locationQuery,
-      workMode,
-      seniority: "Level not specified",
-      postedAt: new Date().toISOString(),
+  for (const { job, match } of jobsToSave) {
+    const result = await saveMatchedJob({
+      supabase: writeSupabase,
+      userId,
+      job,
+      match,
+      roleQuery,
+      skills: profileSkills,
     });
-
-    const { data: existingJob } = await writeSupabase
-      .from("jobs")
-      .select("id")
-      .eq("external_id", externalId)
-      .maybeSingle();
-    let jobId = existingJob?.id;
-
-    if (!jobId) {
-      jobId = randomUUID();
-      const normalizedCompany = normalize(companyName) || "unknown";
-
-      const { data: company } = await writeSupabase
-        .from("companies")
-        .select("id")
-        .eq("normalized_name", normalizedCompany)
-        .maybeSingle();
-
-      let companyId = company?.id;
-      if (!companyId) {
-        companyId = randomUUID();
-        const { error: companyError } = await writeSupabase.from("companies").insert({
-          id: companyId,
-          name: companyName,
-          normalized_name: normalizedCompany,
-          domain: sourceDomain,
-          careers_url: sourceUrl,
-        });
-        if (companyError) return { error: `Could not save company: ${companyError.message}` };
-      }
-
-      const { data: existingSource } = await writeSupabase
-        .from("job_sources")
-        .select("id")
-        .eq("platform", platform)
-        .eq("source_url", sourceUrl)
-        .maybeSingle();
-
-      let sourceId = existingSource?.id;
-      if (!sourceId) {
-        sourceId = randomUUID();
-        const { error: sourceError } = await writeSupabase.from("job_sources").insert({
-          id: sourceId,
-          company_id: companyId,
-          platform,
-          source_url: sourceUrl,
-          status: "active",
-          last_synced_at: new Date().toISOString(),
-          last_success_at: new Date().toISOString(),
-          metadata: { provider: "firecrawl", source: discovery.source ?? "web" },
-        });
-        if (sourceError) return { error: `Could not save job source: ${sourceError.message}` };
-      }
-
-      const { error: insertJobError } = await writeSupabase.from("jobs").insert({
-        id: jobId,
-        source_id: sourceId,
-        external_id: externalId,
-        title,
-        normalized_title: normalize(title) || "unknown-role",
-        description,
-        locations: [locationQuery],
-        work_mode: workMode,
-        employment_type: "Full-time",
-        seniority: "Level not specified",
-        apply_url: canonicalUrl,
-        canonical_url: canonicalUrl,
-        tags: Array.from(new Set([platform, roleQuery, ...profileSkills.slice(0, 4)])).filter(Boolean),
-        posted_at: new Date().toISOString(),
-        company_id: companyId,
-        source_payload: discovery,
-        fingerprint: fingerprintFor([platform, companyName, title, canonicalUrl]),
-      });
-
-      if (insertJobError) {
-        return { error: `Could not save fetched job: ${insertJobError.message}` };
-      }
-    }
-
-    let score = deterministicMatch.score;
-    let explanation = deterministicMatch.reasons.length
-      ? deterministicMatch.reasons
-      : [`Matched your target role: ${roleQuery}`];
-
-    if (ai && description) {
-      try {
-        const aiResponse = await ai.models.generateContent({
-          model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `Profile summary: ${asString(profile.summary, "")}\nLocation: ${locationQuery}\nTarget: ${searchQuery}\n\nJob Title: ${title}\nJob Description: ${description}`,
-                },
-                {
-                  text: 'Evaluate how well this candidate matches the job. Return JSON: { "score": number between 0 and 100, "reasons": ["short reason 1", "short reason 2"] }',
-                },
-              ],
-            },
-          ],
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
-          },
-        });
-
-        if (aiResponse.text) {
-          const matchData = JSON.parse(aiResponse.text) as { score?: unknown; reasons?: unknown };
-          score = typeof matchData.score === "number" ? Math.max(score, Math.round(matchData.score)) : score;
-          const aiReasons = Array.isArray(matchData.reasons)
-            ? matchData.reasons.filter((reason): reason is string => typeof reason === "string")
-            : [];
-          explanation = aiReasons.length ? aiReasons : explanation;
-        }
-      } catch {
-        // Keep the deterministic score when AI matching is unavailable.
-      }
-    }
-
-    const { error: matchError } = await writeSupabase.from("job_matches").upsert(
-      {
-        user_id: userId,
-        job_id: jobId,
-        score: Math.min(100, Math.max(1, score)),
-        components: deterministicMatch.components,
-        explanation,
-      },
-      { onConflict: "user_id,job_id" },
-    );
-
-    if (matchError) {
-      return { error: `Could not save job match: ${matchError.message}` };
-    }
-
+    if ("error" in result) return result;
     added++;
   }
 
-  return { success: true, count: added };
+  return {
+    success: true,
+    count: added,
+    providers: Array.from(new Set(jobsToSave.map(({ job }) => job.source))),
+  };
 }

@@ -11,7 +11,12 @@ function relation<T>(value: unknown): T | null {
 }
 
 function sourceName(value: unknown): string {
-  return String(value);
+  if (typeof value !== "string") return "Company Careers";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "undefined" || trimmed === "null" || trimmed === "Unknown") {
+    return "Company Careers";
+  }
+  return trimmed;
 }
 
 function workMode(value: unknown): WorkMode {
