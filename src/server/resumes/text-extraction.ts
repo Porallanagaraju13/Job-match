@@ -1,9 +1,26 @@
 import "server-only";
 
 import { inflateRawSync, inflateSync } from "node:zlib";
+import mammoth from "mammoth";
+import { PDFParse } from "pdf-parse";
 
-function normalizeWhitespace(value: string) {
+function compactWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function cleanExtractedText(value: string) {
+  return value
+    .replace(/\u0000/g, "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t\f\v]+/g, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function decodeXmlEntities(value: string) {
@@ -21,7 +38,7 @@ function printableText(bytes: Uint8Array) {
   return Buffer.from(bytes)
     .toString("latin1")
     .replace(/[^\x09\x0a\x0d\x20-\x7e]+/g, " ")
-    .replace(/\s+/g, " ");
+    .replace(/[ \t\f\v]+/g, " ");
 }
 
 function decodePdfLiteral(value: string) {
@@ -46,10 +63,10 @@ function extractPdfStrings(value: string) {
     const decoded = Buffer.from(hex, "hex").toString("utf16le");
     if (/[a-z]{3,}/i.test(decoded)) strings.push(decoded);
   }
-  return strings.join(" ");
+  return strings.join("\n");
 }
 
-function extractPdfText(bytes: Uint8Array) {
+function extractPdfTextFallback(bytes: Uint8Array) {
   const buffer = Buffer.from(bytes);
   const raw = buffer.toString("latin1");
   const chunks = [extractPdfStrings(raw)];
@@ -81,8 +98,25 @@ function extractPdfText(bytes: Uint8Array) {
     cursor = streamEnd + "endstream".length;
   }
 
-  const text = normalizeWhitespace(chunks.join(" "));
-  return text.length > 80 ? text : normalizeWhitespace(`${text} ${printableText(bytes)}`);
+  const text = cleanExtractedText(chunks.join("\n"));
+  return text.length > 80 ? text : cleanExtractedText(`${text}\n${printableText(bytes)}`);
+}
+
+async function extractPdfText(bytes: Uint8Array) {
+  let parser: PDFParse | null = null;
+  try {
+    parser = new PDFParse({ data: new Uint8Array(Buffer.from(bytes)) });
+    const result = await parser.getText();
+    const pageText = result.pages.map((page) => page.text).filter(Boolean).join("\n\n");
+    const text = cleanExtractedText(pageText || result.text);
+    if (text.length > 80) return text;
+  } catch {
+    // Fall back to a lightweight text stream reader for PDFs pdf.js cannot decode.
+  } finally {
+    if (parser) await parser.destroy().catch(() => undefined);
+  }
+
+  return extractPdfTextFallback(bytes);
 }
 
 type ZipEntry = {
@@ -146,7 +180,7 @@ function readZipEntry(buffer: Buffer, entry: ZipEntry) {
   return null;
 }
 
-function extractDocxText(bytes: Uint8Array) {
+function extractDocxTextFallback(bytes: Uint8Array) {
   const buffer = Buffer.from(bytes);
   const documentParts = zipEntries(buffer)
     .filter((entry) => /^word\/(document|header\d*|footer\d*|comments)\.xml$/i.test(entry.name))
@@ -165,10 +199,22 @@ function extractDocxText(bytes: Uint8Array) {
     )
     .join("\n");
 
-  return normalizeWhitespace(text);
+  return cleanExtractedText(text);
 }
 
-export function extractResumeText({
+async function extractDocxText(bytes: Uint8Array) {
+  try {
+    const result = await mammoth.extractRawText({ buffer: Buffer.from(bytes) });
+    const text = cleanExtractedText(result.value);
+    if (text.length > 80) return text;
+  } catch {
+    // Keep the custom XML reader as a dependency-light fallback.
+  }
+
+  return extractDocxTextFallback(bytes);
+}
+
+export async function extractResumeText({
   bytes,
   mimeType,
   originalName,
@@ -185,5 +231,5 @@ export function extractResumeText({
   ) {
     return extractDocxText(bytes);
   }
-  return normalizeWhitespace(printableText(bytes));
+  return compactWhitespace(printableText(bytes));
 }

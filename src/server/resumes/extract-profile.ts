@@ -12,6 +12,7 @@ export const extractedProfileSchema = z.object({
   location: z.string().default(""),
   summary: z.string().default(""),
   skills: z.array(z.string()).default([]),
+  targetRoles: z.array(z.string()).default([]),
   experiences: z
     .array(
       z.object({
@@ -72,6 +73,12 @@ const profileJsonSchema = {
       type: "array",
       items: { type: "string" },
       description: "Explicitly stated or directly evidenced professional skills.",
+    },
+    targetRoles: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Realistic job titles the candidate is qualified for based only on resume headline, skills, projects, and experience.",
     },
     experiences: {
       type: "array",
@@ -141,6 +148,7 @@ const profileJsonSchema = {
     "location",
     "summary",
     "skills",
+    "targetRoles",
     "experiences",
     "education",
     "projects",
@@ -158,12 +166,37 @@ function fallbackProfile(originalName: string): ExtractedProfile {
     location: "",
     summary: `We could not extract reliable profile details from ${originalName}. Review and add your details manually.`,
     skills: [],
+    targetRoles: [],
     experiences: [],
     education: [],
     projects: [],
     certifications: [],
     confidence: {
       extractionFallback: 1,
+    },
+  });
+}
+
+function mergeWithLocalDraft(profile: ExtractedProfile, localDraft: ExtractedProfile | null) {
+  if (!localDraft) return profile;
+
+  return extractedProfileSchema.parse({
+    ...profile,
+    fullName: profile.fullName || localDraft.fullName,
+    headline: profile.headline || localDraft.headline,
+    email: profile.email || localDraft.email,
+    phone: profile.phone || localDraft.phone,
+    location: profile.location || localDraft.location,
+    summary: profile.summary || localDraft.summary,
+    skills: profile.skills.length ? profile.skills : localDraft.skills,
+    targetRoles: profile.targetRoles.length ? profile.targetRoles : localDraft.targetRoles,
+    experiences: profile.experiences.length ? profile.experiences : localDraft.experiences,
+    education: profile.education.length ? profile.education : localDraft.education,
+    projects: profile.projects.length ? profile.projects : localDraft.projects,
+    certifications: profile.certifications.length ? profile.certifications : localDraft.certifications,
+    confidence: {
+      ...localDraft.confidence,
+      ...profile.confidence,
     },
   });
 }
@@ -214,6 +247,8 @@ export async function extractProfileFromResume({
               "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
               "Use empty strings, empty arrays, or null dates when evidence is absent.",
               "Keep experience descriptions concise and faithful to the document.",
+              "Return every resume section that is present, including projects, certifications, education, links, and achievements.",
+              "Set targetRoles to accurate job titles supported by the candidate's resume evidence.",
               `Resume text:\n${textHint!.slice(0, 60_000)}`,
             ].join(" "),
           },
@@ -231,6 +266,8 @@ export async function extractProfileFromResume({
               "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
               "Use empty strings, empty arrays, or null dates when evidence is absent.",
               "Keep experience descriptions concise and faithful to the document.",
+              "Return every resume section that is present, including projects, certifications, education, links, and achievements.",
+              "Set targetRoles to accurate job titles supported by the candidate's resume evidence.",
             ].join(" "),
           },
         ];
@@ -249,7 +286,7 @@ export async function extractProfileFromResume({
       },
     });
     if (!response.text) throw new Error("Gemini returned an empty extraction");
-    return extractedProfileSchema.parse(JSON.parse(response.text));
+    return mergeWithLocalDraft(extractedProfileSchema.parse(JSON.parse(response.text)), localDraft);
   } catch (error) {
     // Log error for debugging while maintaining fallback behavior
     console.error("Error extracting profile from resume:", error);

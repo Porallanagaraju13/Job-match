@@ -2,15 +2,24 @@ import "server-only";
 
 import type { ExtractedProfile } from "@/server/resumes/extract-profile";
 import { extractedProfileSchema } from "@/server/resumes/extract-profile";
+import { inferTargetRoles } from "@/server/resumes/role-inference";
 
 const skillCatalog = [
   "JavaScript",
   "TypeScript",
   "React",
   "Next.js",
+  "Angular",
+  "Vue",
+  "Redux",
   "Node.js",
   "Express",
   "Python",
+  "Pandas",
+  "NumPy",
+  "scikit-learn",
+  "TensorFlow",
+  "PyTorch",
   "Django",
   "FastAPI",
   "Java",
@@ -23,6 +32,9 @@ const skillCatalog = [
   "PostgreSQL",
   "MySQL",
   "MongoDB",
+  "Firebase",
+  "Supabase",
+  "Prisma",
   "Redis",
   "AWS",
   "Azure",
@@ -35,6 +47,8 @@ const skillCatalog = [
   "Tailwind CSS",
   "Figma",
   "UI/UX",
+  "UX Design",
+  "Product Design",
   "Machine Learning",
   "Deep Learning",
   "LLM",
@@ -49,13 +63,28 @@ const skillCatalog = [
   "Meta Ads",
   "Digital Marketing",
   "Content Marketing",
+  "Social Media Marketing",
   "Product Management",
   "Agile",
   "Scrum",
   "REST API",
   "GraphQL",
   "Testing",
+  "Selenium",
+  "Playwright",
+  "Cypress",
+  "Jest",
   "CI/CD",
+  "Jenkins",
+  "React Native",
+  "Flutter",
+  "Android",
+  "iOS",
+  "Swift",
+  "Kotlin",
+  "WordPress",
+  "Shopify",
+  "CRM",
 ];
 
 const sectionHeaders = [
@@ -64,17 +93,71 @@ const sectionHeaders = [
   "objective",
   "skills",
   "technical skills",
+  "core skills",
+  "key skills",
   "experience",
   "work experience",
+  "professional experience",
+  "employment history",
+  "work history",
   "employment",
   "education",
   "projects",
+  "academic projects",
+  "personal projects",
   "certifications",
   "certificates",
+  "achievements",
+  "awards",
+  "links",
+  "contact",
 ];
+
+const rolePattern =
+  /\b(engineer|developer|designer|analyst|manager|consultant|specialist|marketer|architect|administrator|scientist|intern|lead|executive|associate|tester|qa|devops)\b/i;
+
+const monthNumbers: Record<string, string> = {
+  jan: "01",
+  january: "01",
+  feb: "02",
+  february: "02",
+  mar: "03",
+  march: "03",
+  apr: "04",
+  april: "04",
+  may: "05",
+  jun: "06",
+  june: "06",
+  jul: "07",
+  july: "07",
+  aug: "08",
+  august: "08",
+  sep: "09",
+  sept: "09",
+  september: "09",
+  oct: "10",
+  october: "10",
+  nov: "11",
+  november: "11",
+  dec: "12",
+  december: "12",
+};
 
 function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeHeader(value: string) {
+  return normalizeWhitespace(value)
+    .toLowerCase()
+    .replace(/^[-*\u2022#\s]+/, "")
+    .replace(/[:\-\u2013\u2014]+$/, "")
+    .trim();
+}
+
+function isSectionHeader(line: string) {
+  const header = normalizeHeader(line);
+  return line.length <= 60 && sectionHeaders.includes(header);
 }
 
 function linesFromText(text: string) {
@@ -120,29 +203,24 @@ function findName(lines: string[]) {
 }
 
 function sectionText(lines: string[], headerNames: string[]) {
-  const start = lines.findIndex((line) =>
-    headerNames.some((header) => line.toLowerCase().replace(/[:\-]+$/, "") === header),
-  );
+  const start = lines.findIndex((line) => headerNames.some((header) => normalizeHeader(line) === header));
   if (start === -1) return "";
 
-  const end = lines.findIndex(
-    (line, index) =>
-      index > start &&
-      sectionHeaders.some((header) => line.toLowerCase().replace(/[:\-]+$/, "") === header),
-  );
-
-  return lines.slice(start + 1, end === -1 ? lines.length : end).join(" ");
+  const end = lines.findIndex((line, index) => index > start && isSectionHeader(line));
+  return lines.slice(start + 1, end === -1 ? lines.length : end).join("\n");
 }
 
 function findSummary(lines: string[], fallbackText: string) {
   const explicit = sectionText(lines, ["summary", "profile", "objective"]);
-  if (explicit) return explicit.slice(0, 700);
+  if (explicit) return explicit.slice(0, 900);
 
-  return lines
-    .filter((line) => line.length > 60 && !line.includes("@"))
-    .slice(0, 2)
-    .join(" ")
-    .slice(0, 700) || fallbackText.slice(0, 500);
+  return (
+    lines
+      .filter((line) => line.length > 60 && !line.includes("@") && !isSectionHeader(line))
+      .slice(0, 3)
+      .join(" ")
+      .slice(0, 900) || fallbackText.slice(0, 500)
+  );
 }
 
 function findSkills(text: string, lines: string[]) {
@@ -152,39 +230,23 @@ function findSkills(text: string, lines: string[]) {
     return new RegExp(`(^|[^a-z0-9+#.])${escaped}([^a-z0-9+#.]|$)`, "i").test(haystack);
   });
 
-  const skillSection = sectionText(lines, ["skills", "technical skills"]);
+  const skillSection = sectionText(lines, ["skills", "technical skills", "core skills", "key skills"]);
   const sectionMatches = skillSection
-    .split(/[,|•;]+/)
+    .split(/[,|\u2022\u00b7;]+|\n/)
+    .map((skill) => skill.replace(/^[A-Za-z /&-]{2,28}:\s*/, ""))
     .map((skill) => normalizeWhitespace(skill))
     .filter((skill) => /^[A-Za-z0-9+#./ -]{2,40}$/.test(skill));
 
-  return unique([...catalogMatches, ...sectionMatches]).slice(0, 40);
+  return unique([...catalogMatches, ...sectionMatches]).slice(0, 50);
 }
 
 function findHeadline(lines: string[], skills: string[]) {
   const titleLine = lines
-    .slice(0, 16)
-    .find((line) =>
-      /\b(engineer|developer|designer|analyst|manager|consultant|specialist|marketer|architect|administrator)\b/i.test(
-        line,
-      ),
-    );
-  if (titleLine && titleLine.length <= 100) return titleLine;
+    .slice(0, 18)
+    .find((line) => rolePattern.test(line) && line.length <= 100 && !line.includes("@") && !isSectionHeader(line));
+  if (titleLine) return titleLine;
 
-  const lowerSkills = skills.map((skill) => skill.toLowerCase());
-  if (lowerSkills.some((skill) => ["react", "next.js", "typescript"].includes(skill))) {
-    return "Frontend Developer";
-  }
-  if (lowerSkills.some((skill) => ["python", "machine learning", "llm"].includes(skill))) {
-    return "AI / Python Engineer";
-  }
-  if (lowerSkills.some((skill) => ["seo", "google ads", "digital marketing"].includes(skill))) {
-    return "Digital Marketing Specialist";
-  }
-  if (lowerSkills.some((skill) => ["power bi", "tableau", "data analysis"].includes(skill))) {
-    return "Data Analyst";
-  }
-  return "";
+  return inferTargetRoles({ skills })[0] ?? "";
 }
 
 function findLocation(lines: string[]) {
@@ -193,74 +255,170 @@ function findLocation(lines: string[]) {
 
   const knownPlaces =
     /\b(Hyderabad|Bengaluru|Bangalore|Chennai|Mumbai|Pune|Delhi|Noida|Gurgaon|Gurugram|Kolkata|Ahmedabad|Remote|San Francisco|New York|London)\b/i;
-  return lines.find((line) => knownPlaces.test(line) && line.length < 90) ?? "";
+  return lines.find((line) => knownPlaces.test(line) && line.length < 100) ?? "";
 }
 
 function findDateRange(line: string) {
   return line.match(
-    /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)?\.?\s?\d{4})\s*(?:-|–|to)\s*((?:Present|Current|Now)|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)?\.?\s?\d{4})/i,
+    /((?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)?\.?\s?\d{4})\s*(?:-|\u2013|\u2014|to)\s*((?:Present|Current|Now)|(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)?\.?\s?\d{4})/i,
   );
 }
 
+function datePartToIso(value: string | undefined) {
+  if (!value || /present|current|now/i.test(value)) return null;
+  const normalized = value.replace(".", "").trim();
+  const monthYear = normalized.match(/^([A-Za-z]+)\s+(\d{4})$/);
+  if (monthYear) {
+    const month = monthNumbers[monthYear[1].toLowerCase()] ?? "01";
+    return `${monthYear[2]}-${month}-01`;
+  }
+  const year = normalized.match(/\d{4}/)?.[0];
+  return year ? `${year}-01-01` : null;
+}
+
+function stripBullet(line: string) {
+  return line.replace(/^[-*\u2022\u00b7\s]+/, "").trim();
+}
+
+function cleanRoleLine(line: string) {
+  return stripBullet(line)
+    .replace(findDateRange(line)?.[0] ?? "", "")
+    .replace(/\s+/g, " ")
+    .replace(/^[-|,\s]+|[-|,\s]+$/g, "")
+    .trim();
+}
+
+function splitTitleCompany(line: string) {
+  const cleaned = cleanRoleLine(line);
+  const parts = cleaned
+    .split(/\s+(?:at|@)\s+|\s+[-|]\s+/i)
+    .map((part) => normalizeWhitespace(part))
+    .filter(Boolean);
+  const title = parts.find((part) => rolePattern.test(part));
+  const company = parts.find((part) => part !== title && part.length > 1);
+  return { title: title ?? "", company: company ?? "" };
+}
+
+function cleanCompanyLine(line: string) {
+  return stripBullet(line)
+    .replace(findDateRange(line)?.[0] ?? "", "")
+    .replace(/^company\s*[:\-]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function descriptionAfter(source: string[], start: number) {
+  const descriptionLines: string[] = [];
+  for (let index = start; index < source.length && descriptionLines.length < 6; index++) {
+    const line = source[index];
+    if (isSectionHeader(line)) break;
+    if (rolePattern.test(line) || findDateRange(line)) break;
+    const cleaned = stripBullet(line);
+    if (cleaned.length > 8 && !findEmail(cleaned)) descriptionLines.push(cleaned);
+  }
+  return descriptionLines.join(" ").slice(0, 700);
+}
+
 function extractExperience(lines: string[]) {
-  const section = sectionText(lines, ["experience", "work experience", "employment"]);
+  const section = sectionText(lines, [
+    "experience",
+    "work experience",
+    "professional experience",
+    "employment",
+    "employment history",
+    "work history",
+  ]);
   const source = section ? linesFromText(section) : lines;
-  const experiences = [];
+  const experiences: ExtractedProfile["experiences"] = [];
 
   for (let index = 0; index < source.length; index++) {
     const line = source[index];
-    const hasTitle = /\b(engineer|developer|designer|analyst|manager|consultant|specialist|architect|intern)\b/i.test(line);
-    const dateRange = findDateRange(`${line} ${source[index + 1] ?? ""}`);
-    if (!hasTitle && !dateRange) continue;
+    if (isSectionHeader(line)) continue;
 
     const nextLine = source[index + 1] ?? "";
+    const previousLine = source[index - 1] ?? "";
+    const dateRange = findDateRange(`${line} ${nextLine}`);
+    const split = splitTitleCompany(line);
+    let title = split.title;
+    let company = split.company;
+    let descriptionStart = index + 1;
+
+    if (!title && rolePattern.test(line)) {
+      title = cleanRoleLine(line);
+    }
+
+    if (!company && title && nextLine && !rolePattern.test(nextLine) && !isSectionHeader(nextLine)) {
+      company = cleanCompanyLine(nextLine);
+      descriptionStart = index + 2;
+    }
+
+    if (!title && dateRange && rolePattern.test(previousLine)) {
+      title = cleanRoleLine(previousLine);
+      company = cleanCompanyLine(line);
+      descriptionStart = index + 1;
+    }
+
+    if (!title || title.length > 100) continue;
+
+    const key = `${title}|${company}`.toLowerCase();
+    if (experiences.some((experience) => `${experience.title}|${experience.company}`.toLowerCase() === key)) {
+      continue;
+    }
+
     experiences.push({
-      company: hasTitle ? nextLine.replace(findDateRange(nextLine)?.[0] ?? "", "").trim() || "Company not specified" : line,
-      title: hasTitle ? line.replace(dateRange?.[0] ?? "", "").trim() : "Role not specified",
-      startDate: null,
-      endDate: null,
-      description: source.slice(index + 2, index + 5).join(" ").slice(0, 500),
+      company: company || "Company not specified",
+      title,
+      startDate: datePartToIso(dateRange?.[1]),
+      endDate: datePartToIso(dateRange?.[2]),
+      description: descriptionAfter(source, descriptionStart),
     });
-    if (experiences.length >= 5) break;
+    if (experiences.length >= 8) break;
   }
 
-  return experiences.filter((experience) => experience.title !== "Role not specified" || experience.company !== "");
+  return experiences;
 }
 
 function extractEducation(lines: string[]) {
   const section = sectionText(lines, ["education"]);
   const source = section ? linesFromText(section) : lines;
   return source
-    .filter((line) => /\b(university|college|institute|school|b\.?tech|m\.?tech|bachelor|master|degree|diploma)\b/i.test(line))
-    .slice(0, 4)
+    .filter((line) => /\b(university|college|institute|school|b\.?tech|m\.?tech|bachelor|master|degree|diploma|mba|b\.?sc|m\.?sc)\b/i.test(line))
+    .slice(0, 6)
     .map((line) => ({
-      institution: line.replace(/\b(bachelor|master|degree|diploma|b\.?tech|m\.?tech).*$/i, "").trim() || line,
+      institution:
+        line
+          .replace(/\b(bachelor|master|degree|diploma|b\.?tech|m\.?tech|b\.?sc|m\.?sc|mba).*$/i, "")
+          .trim() || line,
       degree: line.match(/\b(Bachelor|Master|B\.?Tech|M\.?Tech|B\.?Sc|M\.?Sc|MBA|Degree|Diploma)\b/i)?.[0] ?? "",
-      fieldOfStudy: line.match(/\b(Computer Science|Information Technology|Electronics|Marketing|Finance|Data Science)\b/i)?.[0] ?? "",
+      fieldOfStudy:
+        line.match(/\b(Computer Science|Information Technology|Electronics|Marketing|Finance|Data Science|Mechanical|Civil)\b/i)?.[0] ?? "",
     }));
 }
 
 function extractProjects(lines: string[]) {
-  const section = sectionText(lines, ["projects"]);
+  const section = sectionText(lines, ["projects", "academic projects", "personal projects"]);
   return linesFromText(section)
     .filter((line) => line.length > 8)
-    .slice(0, 5)
-    .map((line) => ({
-      name: line.split(/[:\-–]/)[0].slice(0, 100),
-      description: line.slice(0, 500),
-      link: line.match(/https?:\/\/\S+/)?.[0] ?? "",
-    }));
+    .slice(0, 8)
+    .map((line) => {
+      const cleaned = stripBullet(line);
+      return {
+        name: cleaned.split(/[:|-]/)[0].slice(0, 100).trim() || "Project",
+        description: cleaned.slice(0, 700),
+        link: cleaned.match(/https?:\/\/\S+/)?.[0] ?? "",
+      };
+    });
 }
 
 function extractCertifications(lines: string[]) {
   const section = sectionText(lines, ["certifications", "certificates"]);
   return linesFromText(section)
     .filter((line) => line.length > 4)
-    .slice(0, 6)
+    .slice(0, 10)
     .map((line) => ({
-      name: line.slice(0, 140),
-      issuer: "",
-      date: null,
+      name: stripBullet(line).slice(0, 160),
+      issuer: line.match(/\b(?:by|from|issued by)\s+(.+)$/i)?.[1]?.slice(0, 80) ?? "",
+      date: datePartToIso(line.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)?\.?\s?\d{4}\b/i)?.[0]),
     }));
 }
 
@@ -268,25 +426,38 @@ export function extractProfileFromText(text: string, originalName: string): Extr
   const cleanText = normalizeWhitespace(text);
   const lines = linesFromText(text);
   const skills = findSkills(cleanText, lines);
+  const fullName = findName(lines);
+  const headline = findHeadline(lines, skills);
+  const email = findEmail(cleanText);
+  const phone = findPhone(cleanText);
+  const experiences = extractExperience(lines);
+  const education = extractEducation(lines);
+  const projects = extractProjects(lines);
+  const certifications = extractCertifications(lines);
+  const summary = findSummary(lines, cleanText) || `Profile draft created from ${originalName}.`;
+  const targetRoles = inferTargetRoles({ headline, skills, experiences, summary });
 
   return extractedProfileSchema.parse({
-    fullName: findName(lines),
-    headline: findHeadline(lines, skills),
-    email: findEmail(cleanText),
-    phone: findPhone(cleanText),
+    fullName,
+    headline,
+    email,
+    phone,
     location: findLocation(lines),
-    summary: findSummary(lines, cleanText) || `Profile draft created from ${originalName}.`,
+    summary,
     skills,
-    experiences: extractExperience(lines),
-    education: extractEducation(lines),
-    projects: extractProjects(lines),
-    certifications: extractCertifications(lines),
+    targetRoles,
+    experiences,
+    education,
+    projects,
+    certifications,
     confidence: {
-      localTextExtraction: cleanText.length > 300 ? 0.82 : 0.45,
-      fullName: findName(lines) ? 0.72 : 0.2,
-      email: findEmail(cleanText) ? 0.95 : 0.2,
-      phone: findPhone(cleanText) ? 0.8 : 0.2,
-      skills: skills.length ? 0.78 : 0.25,
+      localTextExtraction: cleanText.length > 300 ? 0.86 : 0.45,
+      fullName: fullName ? 0.75 : 0.2,
+      email: email ? 0.95 : 0.2,
+      phone: phone ? 0.82 : 0.2,
+      skills: skills.length ? 0.82 : 0.25,
+      targetRoles: targetRoles.length ? 0.78 : 0.2,
+      experiences: experiences.length ? 0.72 : 0.25,
     },
   });
 }

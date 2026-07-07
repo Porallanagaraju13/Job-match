@@ -37,7 +37,7 @@ export const processResume = inngest.createFunction(
         .download(resume.storage_path);
       if (downloadError || !file) throw downloadError ?? new Error("Resume download failed");
       const bytes = new Uint8Array(await file.arrayBuffer());
-      const textHint = extractResumeText({
+      const textHint = await extractResumeText({
         originalName,
         bytes,
         mimeType: resume.mime_type,

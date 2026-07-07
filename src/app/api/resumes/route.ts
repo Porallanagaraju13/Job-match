@@ -56,7 +56,7 @@ export async function POST(request: Request) {
 
   if (!supabase) {
     const id = randomUUID();
-    const resumeText = extractResumeText({
+    const resumeText = await extractResumeText({
       bytes,
       mimeType: file.type || "application/pdf",
       originalName: file.name,
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
 
   await supabase.from("profiles").update({ onboarding_state: "processing" }).eq("id", user.id);
 
-  const resumeText = extractResumeText({ bytes, mimeType, originalName: file.name });
+  const resumeText = await extractResumeText({ bytes, mimeType, originalName: file.name });
   const localExtraction = extractProfileFromText(resumeText, file.name);
   await supabase.from("resume_extractions").insert({
     user_id: user.id,

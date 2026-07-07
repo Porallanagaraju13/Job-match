@@ -6,6 +6,7 @@ import { discoverDirectProviderJobs } from "@/server/jobs/direct-providers";
 import { discoverJobPages, type FirecrawlJobDiscoveryResult } from "@/server/jobs/firecrawl";
 import { inferWorkMode, type NormalizedSourceJob } from "@/server/jobs/source-adapter";
 import { scoreJob, type MatchProfile, type MatchResult } from "@/server/matching/score-job";
+import { inferTargetRoles } from "@/server/resumes/role-inference";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/server/supabase/server";
 
 function normalize(value: string) {
@@ -24,6 +25,16 @@ function stringArray(value: unknown) {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
     : [];
+}
+
+function uniqueSearchRoles(values: string[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = normalize(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function hostname(value: string) {
@@ -97,26 +108,6 @@ function isLegacyDemoProfile(value: {
   );
 }
 
-function inferRoleFromSkills(skills: string[]) {
-  const lowerSkills = skills.map((skill) => skill.toLowerCase());
-  if (lowerSkills.some((skill) => ["react", "next.js", "typescript", "javascript"].includes(skill))) {
-    return "Frontend Developer";
-  }
-  if (lowerSkills.some((skill) => ["node.js", "express", "postgresql", "mongodb"].includes(skill))) {
-    return "Backend Developer";
-  }
-  if (lowerSkills.some((skill) => ["python", "machine learning", "deep learning", "llm"].includes(skill))) {
-    return "AI Engineer";
-  }
-  if (lowerSkills.some((skill) => ["data analysis", "power bi", "tableau", "sql"].includes(skill))) {
-    return "Data Analyst";
-  }
-  if (lowerSkills.some((skill) => ["seo", "google ads", "digital marketing", "content marketing"].includes(skill))) {
-    return "Digital Marketing Specialist";
-  }
-  return "Software Engineer";
-}
-
 function firecrawlToProviderJob(
   discovery: FirecrawlJobDiscoveryResult,
   locationQuery: string,
@@ -147,6 +138,16 @@ function scoreProviderJob(matchProfile: MatchProfile, job: NormalizedSourceJob) 
     location: job.location,
     workMode: job.workMode,
     postedAt: job.postedAt ?? undefined,
+  });
+}
+
+function dedupeProviderJobs(jobs: NormalizedSourceJob[]) {
+  const seen = new Set<string>();
+  return jobs.filter((job) => {
+    const key = job.applyUrl || `${job.source}:${job.externalId || job.company}:${job.title}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 
@@ -303,7 +304,7 @@ export async function fetchCloudJobsForUser(userId: string) {
     };
   }
 
-  const [{ data: profile }, { data: preferences }, { data: skills }] = await Promise.all([
+  const [{ data: profile }, { data: preferences }, { data: skills }, { data: experiences }] = await Promise.all([
     sessionSupabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
     sessionSupabase
       .from("job_preferences")
@@ -311,6 +312,7 @@ export async function fetchCloudJobsForUser(userId: string) {
       .eq("user_id", userId)
       .maybeSingle(),
     sessionSupabase.from("profile_skills").select("skill").eq("user_id", userId).order("skill"),
+    sessionSupabase.from("experiences").select("title").eq("user_id", userId).order("position"),
   ]);
 
   if (!profile) return { error: "Profile not found" };
@@ -318,17 +320,24 @@ export async function fetchCloudJobsForUser(userId: string) {
   const usesLegacyDemoProfile = isLegacyDemoProfile(profile);
   const targetRoles = stringArray(preferences?.target_roles);
   const profileSkills = usesLegacyDemoProfile ? [] : stringArray((skills ?? []).map((item) => item.skill));
+  const inferredTargetRoles = usesLegacyDemoProfile
+    ? ["Software Engineer"]
+    : inferTargetRoles({
+        headline: profile.headline,
+        summary: profile.summary,
+        skills: profileSkills,
+        experiences: experiences ?? [],
+      });
+  const profileTargetRoles = targetRoles.length ? targetRoles : inferredTargetRoles;
   const preferredLocations = stringArray(preferences?.preferred_locations);
   const workModes = stringArray(preferences?.work_modes);
   const seniorityLevels = stringArray(preferences?.seniority_levels);
-  const roleQuery =
-    targetRoles[0] ??
-    (usesLegacyDemoProfile ? "Software Engineer" : asString(profile.headline, inferRoleFromSkills(profileSkills)));
+  const roleQuery = profileTargetRoles[0] ?? asString(profile.headline, "Software Engineer");
   const locationQuery =
     preferredLocations[0] ?? (usesLegacyDemoProfile ? "Remote" : asString(profile.location, "Remote"));
   const matchProfile: MatchProfile = {
     skills: profileSkills,
-    targetRoles: targetRoles.length ? targetRoles : [roleQuery],
+    targetRoles: profileTargetRoles.length ? profileTargetRoles : [roleQuery],
     preferredLocations: preferredLocations.length ? preferredLocations : [locationQuery],
     workModes: workModes.length ? workModes : ["Remote", "Hybrid", "On-site"],
     seniorityLevels: seniorityLevels.length ? seniorityLevels : ["Senior", "Lead", "Mid"],
@@ -336,22 +345,31 @@ export async function fetchCloudJobsForUser(userId: string) {
       typeof preferences?.minimum_salary === "number" ? preferences.minimum_salary : undefined,
   };
 
-  const directJobs = await discoverDirectProviderJobs({
-    roleQuery,
-    locationQuery,
-    skills: profileSkills,
-  });
+  const searchRoles = uniqueSearchRoles(profileTargetRoles.length ? profileTargetRoles : [roleQuery]).slice(0, 3);
+  const directJobs = dedupeProviderJobs(
+    (
+      await Promise.all(
+        searchRoles.map((searchRole) =>
+          discoverDirectProviderJobs({
+            roleQuery: searchRole,
+            locationQuery,
+            skills: profileSkills,
+          }),
+        ),
+      )
+    ).flat(),
+  );
 
   let providerJobs = directJobs;
   if (providerJobs.length < 8 && process.env.FIRECRAWL_API_KEY) {
     try {
-      const discoveries = await discoverJobPages([roleQuery, ...profileSkills.slice(0, 3)].join(" "), {
+      const discoveries = await discoverJobPages([...searchRoles.slice(0, 2), ...profileSkills.slice(0, 3)].join(" "), {
         location: locationQuery,
       });
-      providerJobs = [
+      providerJobs = dedupeProviderJobs([
         ...providerJobs,
         ...discoveries.map((discovery) => firecrawlToProviderJob(discovery, locationQuery)),
-      ];
+      ]);
     } catch {
       // Direct provider results are still useful; Firecrawl is only a fallback.
     }

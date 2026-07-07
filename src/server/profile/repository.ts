@@ -3,6 +3,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProfileDraft } from "@/lib/types";
 import { extractedProfileSchema } from "@/server/resumes/extract-profile";
+import { inferTargetRoles } from "@/server/resumes/role-inference";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
 function metadataValue(metadata: unknown, ...keys: string[]) {
@@ -133,7 +134,7 @@ export async function getProfileDraftForCurrentUser(): Promise<ProfileDraft> {
     location: storedProfile?.location || extractedValue?.location || "",
     summary: storedProfile?.summary || extractedValue?.summary || "",
     skills: storedSkills.length ? storedSkills : extractedValue?.skills ?? [],
-    targetRoles,
+    targetRoles: targetRoles.length ? targetRoles : extractedValue?.targetRoles ?? [],
     experiences: storedExperiences.length ? storedExperiences : extractedValue?.experiences ?? [],
     education: storedEducation.length ? storedEducation : extractedValue?.education ?? [],
     projects: extractedValue?.projects ?? [],
@@ -151,6 +152,14 @@ export async function upsertProfileFromExtraction(
 
   const { data } = extracted;
   if (isFallbackExtraction(data)) return;
+  const targetRoles = data.targetRoles.length
+    ? data.targetRoles
+    : inferTargetRoles({
+        headline: data.headline,
+        summary: data.summary,
+        skills: data.skills,
+        experiences: data.experiences,
+      });
 
   const { data: existingProfile } = await supabase
     .from("profiles")
@@ -208,6 +217,38 @@ export async function upsertProfileFromExtraction(
         field_of_study: education.fieldOfStudy,
         position,
       })),
+    );
+  }
+
+  if (targetRoles.length) {
+    const { data: existingPreferences } = await supabase
+      .from("job_preferences")
+      .select("preferred_locations, work_modes, seniority_levels, minimum_salary, salary_currency")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    await supabase.from("job_preferences").upsert(
+      {
+        user_id: userId,
+        target_roles: targetRoles,
+        preferred_locations:
+          Array.isArray(existingPreferences?.preferred_locations) && existingPreferences.preferred_locations.length
+            ? existingPreferences.preferred_locations
+            : data.location
+              ? [data.location]
+              : [],
+        work_modes:
+          Array.isArray(existingPreferences?.work_modes) && existingPreferences.work_modes.length
+            ? existingPreferences.work_modes
+            : ["Remote", "Hybrid", "On-site"],
+        seniority_levels:
+          Array.isArray(existingPreferences?.seniority_levels) && existingPreferences.seniority_levels.length
+            ? existingPreferences.seniority_levels
+            : ["Entry", "Junior", "Mid", "Senior", "Lead"],
+        minimum_salary: existingPreferences?.minimum_salary ?? null,
+        salary_currency: existingPreferences?.salary_currency ?? "USD",
+      },
+      { onConflict: "user_id" },
     );
   }
 }
