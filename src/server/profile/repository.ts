@@ -5,6 +5,37 @@ import type { ProfileDraft } from "@/lib/types";
 import { extractedProfileSchema } from "@/server/resumes/extract-profile";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
+function metadataValue(metadata: unknown, ...keys: string[]) {
+  if (!metadata || typeof metadata !== "object") return "";
+  const record = metadata as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function isLegacyDemoProfile(value: {
+  full_name?: string | null;
+  email?: string | null;
+  summary?: string | null;
+} | null | undefined) {
+  return (
+    value?.full_name === "Alex Morgan" &&
+    (value.email === "alex@example.com" ||
+      value.summary?.startsWith("Reviewed profile draft created from "))
+  );
+}
+
+function isFallbackExtraction(value: unknown) {
+  const extracted = extractedProfileSchema.safeParse(value);
+  if (!extracted.success) return false;
+  return (
+    extracted.data.confidence.extractionFallback === 1 ||
+    (extracted.data.fullName === "Alex Morgan" && extracted.data.email === "alex@example.com")
+  );
+}
+
 export async function getProfileDraftForCurrentUser(): Promise<ProfileDraft> {
   const emptyProfile: ProfileDraft = {
     fullName: "",
@@ -26,6 +57,8 @@ export async function getProfileDraftForCurrentUser(): Promise<ProfileDraft> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return emptyProfile;
+  const accountFullName = metadataValue(user.user_metadata, "full_name", "name");
+  const accountEmail = user.email ?? "";
 
   const [
     { data: profile },
@@ -67,39 +100,42 @@ export async function getProfileDraftForCurrentUser(): Promise<ProfileDraft> {
     ]);
 
   const extracted = extractedProfileSchema.safeParse(extraction?.raw_data);
-  const extractedValue = extracted.success ? extracted.data : null;
-  const storedSkills = (skills ?? []).map((item) => item.skill).filter(Boolean);
+  const extractedValue = extracted.success && !isFallbackExtraction(extraction?.raw_data) ? extracted.data : null;
+  const storedProfile = isLegacyDemoProfile(profile) ? null : profile;
+  const storedSkills = storedProfile ? (skills ?? []).map((item) => item.skill).filter(Boolean) : [];
+  const storedExperiences =
+    storedProfile && experiences?.length
+      ? experiences.map((experience) => ({
+          company: experience.company,
+          title: experience.title,
+          startDate: experience.start_date,
+          endDate: experience.end_date,
+          description: experience.description ?? "",
+        }))
+      : [];
+  const storedEducation =
+    storedProfile && education?.length
+      ? education.map((item) => ({
+          institution: item.institution,
+          degree: item.degree ?? "",
+          fieldOfStudy: item.field_of_study ?? "",
+        }))
+      : [];
   const targetRoles = Array.isArray(preferences?.target_roles)
     ? preferences.target_roles.filter((role): role is string => typeof role === "string")
     : [];
 
   return {
-    fullName: profile?.full_name || extractedValue?.fullName || user.user_metadata.full_name || "",
-    headline: profile?.headline || extractedValue?.headline || "",
-    email: profile?.email || extractedValue?.email || user.email || "",
-    phone: profile?.phone || extractedValue?.phone || "",
-    location: profile?.location || extractedValue?.location || "",
-    summary: profile?.summary || extractedValue?.summary || "",
+    fullName: storedProfile?.full_name || accountFullName || extractedValue?.fullName || "",
+    headline: storedProfile?.headline || extractedValue?.headline || "",
+    email: storedProfile?.email || accountEmail || extractedValue?.email || "",
+    phone: storedProfile?.phone || extractedValue?.phone || "",
+    location: storedProfile?.location || extractedValue?.location || "",
+    summary: storedProfile?.summary || extractedValue?.summary || "",
     skills: storedSkills.length ? storedSkills : extractedValue?.skills ?? [],
     targetRoles,
-    experiences:
-      experiences?.length
-        ? experiences.map((experience) => ({
-            company: experience.company,
-            title: experience.title,
-            startDate: experience.start_date,
-            endDate: experience.end_date,
-            description: experience.description ?? "",
-          }))
-        : extractedValue?.experiences ?? [],
-    education:
-      education?.length
-        ? education.map((item) => ({
-            institution: item.institution,
-            degree: item.degree ?? "",
-            fieldOfStudy: item.field_of_study ?? "",
-          }))
-        : extractedValue?.education ?? [],
+    experiences: storedExperiences.length ? storedExperiences : extractedValue?.experiences ?? [],
+    education: storedEducation.length ? storedEducation : extractedValue?.education ?? [],
     projects: extractedValue?.projects ?? [],
     certifications: extractedValue?.certifications ?? [],
   };
@@ -114,17 +150,24 @@ export async function upsertProfileFromExtraction(
   if (!extracted.success) return;
 
   const { data } = extracted;
+  if (isFallbackExtraction(data)) return;
+
+  const { data: existingProfile } = await supabase
+    .from("profiles")
+    .select("full_name, headline, email, phone, location, summary")
+    .eq("id", userId)
+    .maybeSingle();
 
   // Update profile
   await supabase
     .from("profiles")
     .update({
-      full_name: data.fullName,
-      headline: data.headline,
-      email: data.email,
-      phone: data.phone,
-      location: data.location,
-      summary: data.summary,
+      full_name: data.fullName || existingProfile?.full_name || null,
+      headline: data.headline || existingProfile?.headline || null,
+      email: data.email || existingProfile?.email || null,
+      phone: data.phone || existingProfile?.phone || null,
+      location: data.location || existingProfile?.location || null,
+      summary: data.summary || existingProfile?.summary || null,
     })
     .eq("id", userId);
 

@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
 export const extractedProfileSchema = z.object({
-  fullName: z.string().min(1),
+  fullName: z.string().default(""),
   headline: z.string().default(""),
   email: z.string().email().or(z.literal("")),
   phone: z.string().default(""),
@@ -150,37 +150,19 @@ const profileJsonSchema = {
 
 function fallbackProfile(originalName: string): ExtractedProfile {
   return extractedProfileSchema.parse({
-    fullName: "Alex Morgan",
-    headline: "Senior Product Manager",
-    email: "alex@example.com",
-    phone: "+1 (415) 555-0148",
-    location: "San Francisco, CA",
-    summary: `Reviewed profile draft created from ${originalName}.`,
-    skills: ["Product strategy", "Roadmapping", "B2B SaaS", "Analytics", "User research", "AI products"],
-    experiences: [
-      {
-        company: "Northstar Labs",
-        title: "Senior Product Manager",
-        startDate: "2022-01-01",
-        endDate: null,
-        description: "Led product strategy and cross-functional delivery.",
-      },
-    ],
-    education: [
-      {
-        institution: "University of California",
-        degree: "B.S.",
-        fieldOfStudy: "Computer Science",
-      },
-    ],
+    fullName: "",
+    headline: "",
+    email: "",
+    phone: "",
+    location: "",
+    summary: `We could not extract reliable profile details from ${originalName}. Review and add your details manually.`,
+    skills: [],
+    experiences: [],
+    education: [],
     projects: [],
     certifications: [],
     confidence: {
-      fullName: 0.99,
-      email: 0.98,
-      headline: 0.93,
-      location: 0.91,
-      skills: 0.88,
+      extractionFallback: 1,
     },
   });
 }

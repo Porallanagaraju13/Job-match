@@ -40,6 +40,15 @@ const platformDetails: Array<{ source: string; mark: string }> = [
   { source: "Wellfound", mark: "W:" },
 ];
 
+function sourceMark(source: string) {
+  const letters = source
+    .split(/[^a-z0-9]+/i)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("");
+  return (letters || source).slice(0, 3).toUpperCase();
+}
+
 function profileScore(profile: ProfileDraft, hasResume: boolean) {
   const checks = [
     Boolean(profile.fullName && profile.email && profile.phone && profile.location),
@@ -65,15 +74,28 @@ export function JobsExplorer({
   const searchParams = useSearchParams();
   const { isSaved, toggleSaved } = useSavedJobs();
   const [query, setQuery] = useState("");
-  const [sources, setSources] = useState<JobSource[]>(platformDetails.map((item) => item.source));
+  const [sources, setSources] = useState<JobSource[]>([]);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [starting, setStarting] = useState(false);
   const completeness = profileScore(profile, hasResume);
+  const availablePlatforms = useMemo(() => {
+    const details = new Map(platformDetails.map((platform) => [platform.source, platform]));
+    for (const job of jobs) {
+      if (!details.has(job.source)) {
+        details.set(job.source, { source: job.source, mark: sourceMark(job.source) });
+      }
+    }
+    return Array.from(details.values());
+  }, [jobs]);
+  const activeSources = useMemo(
+    () => (sources.length ? sources : availablePlatforms.map((item) => item.source)),
+    [availablePlatforms, sources],
+  );
 
   const visibleJobs = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return jobs
-      .filter((job) => sources.includes(job.source))
+      .filter((job) => activeSources.includes(job.source))
       .filter(
         (job) =>
           !normalizedQuery ||
@@ -83,11 +105,14 @@ export function JobsExplorer({
             .includes(normalizedQuery),
       )
       .sort((a, b) => b.matchScore - a.matchScore);
-  }, [jobs, query, sources]);
+  }, [jobs, query, activeSources]);
 
   function toggleSource(source: JobSource) {
-    setSources((current) =>
-      current.includes(source) ? current.filter((item) => item !== source) : [...current, source],
+    const currentSources = sources.length ? sources : availablePlatforms.map((item) => item.source);
+    setSources(
+      currentSources.includes(source)
+        ? currentSources.filter((item) => item !== source)
+        : [...currentSources, source],
     );
   }
 
@@ -140,8 +165,8 @@ export function JobsExplorer({
           <section>
             <h3 className="font-heading text-xl font-semibold">Job Platforms</h3>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {platformDetails.map((platform) => {
-                const active = sources.includes(platform.source);
+              {availablePlatforms.map((platform) => {
+                const active = activeSources.includes(platform.source);
                 return (
                   <button
                     key={platform.source}

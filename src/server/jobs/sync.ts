@@ -3,6 +3,7 @@ import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { createHash, randomUUID } from "node:crypto";
 import { discoverJobPages, type FirecrawlJobDiscoveryResult } from "@/server/jobs/firecrawl";
+import { scoreJob, type MatchProfile } from "@/server/matching/score-job";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/server/supabase/server";
 
 function normalize(value: string) {
@@ -90,6 +91,24 @@ function workModeFrom(description: string, locationQuery: string) {
   return "On-site";
 }
 
+function stringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : [];
+}
+
+function isLegacyDemoProfile(value: {
+  full_name?: string | null;
+  email?: string | null;
+  summary?: string | null;
+} | null | undefined) {
+  return (
+    value?.full_name === "Alex Morgan" &&
+    (value.email === "alex@example.com" ||
+      value.summary?.startsWith("Reviewed profile draft created from "))
+  );
+}
+
 function sourceUrlFor(canonicalUrl: string) {
   const host = hostname(canonicalUrl);
   return host ? `https://${host}` : canonicalUrl;
@@ -117,20 +136,42 @@ export async function fetchCloudJobsForUser(userId: string) {
     };
   }
 
-  const [{ data: profile }, { data: preferences }] = await Promise.all([
+  const [{ data: profile }, { data: preferences }, { data: skills }] = await Promise.all([
     sessionSupabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
-    sessionSupabase.from("job_preferences").select("target_roles").eq("user_id", userId).maybeSingle(),
+    sessionSupabase
+      .from("job_preferences")
+      .select("target_roles, preferred_locations, work_modes, seniority_levels, minimum_salary")
+      .eq("user_id", userId)
+      .maybeSingle(),
+    sessionSupabase.from("profile_skills").select("skill").eq("user_id", userId).order("skill"),
   ]);
 
   if (!profile) return { error: "Profile not found" };
 
-  const targetRoles = Array.isArray(preferences?.target_roles)
-    ? preferences.target_roles.filter((role): role is string => typeof role === "string")
-    : [];
+  const usesLegacyDemoProfile = isLegacyDemoProfile(profile);
+  const targetRoles = stringArray(preferences?.target_roles);
+  const profileSkills = usesLegacyDemoProfile ? [] : stringArray((skills ?? []).map((item) => item.skill));
+  const preferredLocations = stringArray(preferences?.preferred_locations);
+  const workModes = stringArray(preferences?.work_modes);
+  const seniorityLevels = stringArray(preferences?.seniority_levels);
 
-  const roleQuery = targetRoles.length > 0 ? targetRoles[0] : asString(profile.headline, "Software Engineer");
-  const locationQuery = asString(profile.location, "Remote");
-  const searchQuery = `${roleQuery} in ${locationQuery}`;
+  const roleQuery =
+    targetRoles.length > 0 || !usesLegacyDemoProfile
+      ? targetRoles[0] ?? asString(profile.headline, "Software Engineer")
+      : "Software Engineer";
+  const locationQuery =
+    preferredLocations[0] ?? (usesLegacyDemoProfile ? "Remote" : asString(profile.location, "Remote"));
+  const skillQuery = profileSkills.slice(0, 4).join(" ");
+  const searchQuery = [roleQuery, skillQuery].filter(Boolean).join(" ");
+  const matchProfile: MatchProfile = {
+    skills: profileSkills,
+    targetRoles: targetRoles.length ? targetRoles : [roleQuery],
+    preferredLocations: preferredLocations.length ? preferredLocations : [locationQuery],
+    workModes: workModes.length ? workModes : ["Remote", "Hybrid", "On-site"],
+    seniorityLevels: seniorityLevels.length ? seniorityLevels : ["Senior", "Lead", "Mid"],
+    minimumSalary:
+      typeof preferences?.minimum_salary === "number" ? preferences.minimum_salary : undefined,
+  };
 
   if (!process.env.FIRECRAWL_API_KEY) {
     return { error: "FIRECRAWL_API_KEY not configured" };
@@ -161,6 +202,16 @@ export async function fetchCloudJobsForUser(userId: string) {
     const title = roleTitleFromSearchResult(discovery, companyName);
     const description = discovery.description || "View the original posting for details.";
     const externalId = fingerprintFor([platform, companyName, title, canonicalUrl]);
+    const workMode = workModeFrom(description, locationQuery);
+    const deterministicMatch = scoreJob(matchProfile, {
+      title,
+      description,
+      tags: [platform, ...profileSkills.slice(0, 6)],
+      location: locationQuery,
+      workMode,
+      seniority: "Level not specified",
+      postedAt: new Date().toISOString(),
+    });
 
     const { data: existingJob } = await writeSupabase
       .from("jobs")
@@ -223,12 +274,12 @@ export async function fetchCloudJobsForUser(userId: string) {
         normalized_title: normalize(title) || "unknown-role",
         description,
         locations: [locationQuery],
-        work_mode: workModeFrom(description, locationQuery),
+        work_mode: workMode,
         employment_type: "Full-time",
         seniority: "Level not specified",
         apply_url: canonicalUrl,
         canonical_url: canonicalUrl,
-        tags: ["Firecrawl", platform],
+        tags: Array.from(new Set([platform, roleQuery, ...profileSkills.slice(0, 4)])).filter(Boolean),
         posted_at: new Date().toISOString(),
         company_id: companyId,
         source_payload: discovery,
@@ -240,8 +291,10 @@ export async function fetchCloudJobsForUser(userId: string) {
       }
     }
 
-    let score = 75;
-    let explanation = ["Discovered from a matching job board page."];
+    let score = deterministicMatch.score;
+    let explanation = deterministicMatch.reasons.length
+      ? deterministicMatch.reasons
+      : [`Matched your target role: ${roleQuery}`];
 
     if (ai && description) {
       try {
@@ -268,10 +321,11 @@ export async function fetchCloudJobsForUser(userId: string) {
 
         if (aiResponse.text) {
           const matchData = JSON.parse(aiResponse.text) as { score?: unknown; reasons?: unknown };
-          score = typeof matchData.score === "number" ? matchData.score : score;
-          explanation = Array.isArray(matchData.reasons)
+          score = typeof matchData.score === "number" ? Math.max(score, Math.round(matchData.score)) : score;
+          const aiReasons = Array.isArray(matchData.reasons)
             ? matchData.reasons.filter((reason): reason is string => typeof reason === "string")
-            : explanation;
+            : [];
+          explanation = aiReasons.length ? aiReasons : explanation;
         }
       } catch {
         // Keep the deterministic score when AI matching is unavailable.
@@ -282,7 +336,8 @@ export async function fetchCloudJobsForUser(userId: string) {
       {
         user_id: userId,
         job_id: jobId,
-        score,
+        score: Math.min(100, Math.max(1, score)),
+        components: deterministicMatch.components,
         explanation,
       },
       { onConflict: "user_id,job_id" },

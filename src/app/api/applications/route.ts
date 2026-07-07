@@ -10,6 +10,48 @@ const updateSchema = z.object({
   state: z.enum(["ready_for_review", "submitted"]),
 });
 
+async function markApplicationReady({
+  supabase,
+  applicationId,
+  userId,
+  applyUrl,
+}: {
+  supabase: NonNullable<Awaited<ReturnType<typeof createServerSupabaseClient>>>;
+  applicationId: string;
+  userId: string;
+  applyUrl: string;
+}) {
+  try {
+    const { scanApplicationForm } = await import("@/server/applications/browserbase");
+    const scan = await scanApplicationForm(applyUrl);
+
+    await supabase
+      .from("applications")
+      .update({
+        state: "ready_for_review",
+        current_step: "review",
+        provider_run_id: scan.sessionId ?? null,
+        failure_message: null,
+      })
+      .eq("id", applicationId)
+      .eq("user_id", userId);
+  } catch (error) {
+    console.error("Application preparation failed; falling back to review state:", error);
+    await supabase
+      .from("applications")
+      .update({
+        state: "ready_for_review",
+        current_step: "review",
+        failure_message:
+          error instanceof Error
+            ? error.message
+            : "Application automation could not scan the form.",
+      })
+      .eq("id", applicationId)
+      .eq("user_id", userId);
+  }
+}
+
 export async function POST(request: Request) {
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "A valid job ID is required." }, { status: 400 });
@@ -54,33 +96,30 @@ export async function POST(request: Request) {
 
   const sourceRelation = job.job_sources as unknown as { platform?: string } | null;
   if (process.env.INNGEST_EVENT_KEY) {
-    await inngest.send({
-      name: "jobbuddy/application.prepare.requested",
-      data: {
-        applicationId: application.id,
-        userId: user.id,
-        applyUrl: job.apply_url,
-        platform: sourceRelation?.platform ?? "unknown",
-      },
-    });
-    return NextResponse.json({ id: application.id, mode: "supabase", state: "queued" }, { status: 202 });
-  } else {
-    // Fallback: Process synchronously if Inngest is not configured
-    const { scanApplicationForm } = await import("@/server/applications/browserbase");
-    const scan = await scanApplicationForm(job.apply_url);
-    
-    await supabase
-      .from("applications")
-      .update({
-        state: "ready_for_review",
-        current_step: "review",
-        provider_run_id: scan.sessionId ?? null,
-      })
-      .eq("id", application.id)
-      .eq("user_id", user.id);
-      
-    return NextResponse.json({ id: application.id, mode: "supabase", state: "ready_for_review" }, { status: 200 });
+    try {
+      await inngest.send({
+        name: "jobbuddy/application.prepare.requested",
+        data: {
+          applicationId: application.id,
+          userId: user.id,
+          applyUrl: job.apply_url,
+          platform: sourceRelation?.platform ?? "unknown",
+        },
+      });
+      return NextResponse.json({ id: application.id, mode: "supabase", state: "queued" }, { status: 202 });
+    } catch (error) {
+      console.error("Could not enqueue application preparation; preparing synchronously:", error);
+    }
   }
+
+  await markApplicationReady({
+    supabase,
+    applicationId: application.id,
+    userId: user.id,
+    applyUrl: job.apply_url,
+  });
+
+  return NextResponse.json({ id: application.id, mode: "supabase", state: "ready_for_review" }, { status: 200 });
 }
 
 export async function PATCH(request: Request) {
