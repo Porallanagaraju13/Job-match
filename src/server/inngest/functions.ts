@@ -4,6 +4,7 @@ import { LeverAdapter } from "@/server/jobs/lever";
 import type { JobSourceAdapter } from "@/server/jobs/source-adapter";
 import { inngest } from "@/server/inngest/client";
 import { extractProfileFromResume } from "@/server/resumes/extract-profile";
+import { assessResumeExtraction } from "@/server/resumes/resume-quality";
 import { extractResumeText } from "@/server/resumes/text-extraction";
 import { createServiceRoleClient } from "@/server/supabase/server";
 
@@ -79,6 +80,19 @@ export const processResume = inngest.createFunction(
       // Automatically map extracted data to profile
       const { upsertProfileFromExtraction } = await import("@/server/profile/repository");
       await upsertProfileFromExtraction(supabase, userId, extraction);
+
+      const quality = assessResumeExtraction(extraction);
+      await supabase.from("activity_events").insert({
+        user_id: userId,
+        event_type: "resume.extraction.completed",
+        safe_metadata: {
+          resumeId,
+          completenessScore: quality.completenessScore,
+          confidenceScore: quality.confidenceScore,
+          reviewFieldCount: quality.reviewFields.length,
+          parserVersion: "gemini-v2",
+        },
+      });
 
       return { mode: "supabase", resumeId };
     });

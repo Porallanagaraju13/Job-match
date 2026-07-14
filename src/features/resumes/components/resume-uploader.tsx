@@ -32,6 +32,7 @@ export function ResumeUploader() {
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [stage, setStage] = useState("Uploading securely");
 
   function chooseFile(nextFile: File | undefined) {
     setError(null);
@@ -63,18 +64,40 @@ export function ResumeUploader() {
     setUploading(true);
     setError(null);
     setProgress(18);
+    setStage("Uploading securely");
     const formData = new FormData();
     formData.append("file", file);
 
     const progressTimer = window.setInterval(() => {
-      setProgress((value) => Math.min(value + 16, 88));
+      setProgress((value) => Math.min(value + 9, 82));
     }, 250);
 
     try {
       const response = await fetch("/api/resumes", { method: "POST", body: formData });
-      if (!response.ok) throw new Error("Upload could not be completed.");
+      const payload = (await response.json().catch(() => null)) as
+        | { id?: string; status?: string; error?: string }
+        | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Upload could not be completed.");
+      setProgress(86);
+      setStage(payload?.status === "processing" ? "Enhancing extracted sections" : "Preparing review");
+
+      if (payload?.status === "processing" && payload.id) {
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 750));
+          const statusResponse = await fetch(`/api/resumes/${payload.id}/status`, { cache: "no-store" });
+          const statusPayload = (await statusResponse.json().catch(() => null)) as { status?: string } | null;
+          setProgress(Math.min(88 + attempt, 98));
+          if (statusPayload?.status === "review_required" || statusPayload?.status === "ready") break;
+          if (statusPayload?.status === "failed") {
+            setError("AI enhancement failed. Your local draft is available for review.");
+            break;
+          }
+        }
+      }
+
+      setStage("Profile draft ready");
       setProgress(100);
-      window.setTimeout(() => router.push("/onboarding/review"), 350);
+      window.setTimeout(() => router.push("/onboarding/review"), 250);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload could not be completed.");
       setUploading(false);
@@ -148,7 +171,7 @@ export function ResumeUploader() {
                     ) : (
                       <LoaderCircle className="size-4 animate-spin text-primary" />
                     )}
-                    {progress === 100 ? "Profile draft ready" : "Extracting profile data…"}
+                    {progress === 100 ? "Profile draft ready" : stage}
                   </span>
                   <span className="text-muted-foreground">{progress}%</span>
                 </div>
@@ -171,7 +194,7 @@ export function ResumeUploader() {
           onClick={processResume}
         >
           {uploading ? <LoaderCircle className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-          {uploading ? "Building your profile…" : "Upload & create profile"}
+          {uploading ? stage : "Upload & create profile"}
           {!uploading && <ArrowRight className="size-4" />}
         </Button>
 

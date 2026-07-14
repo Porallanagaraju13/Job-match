@@ -54,6 +54,12 @@ function postedLabel(postedAt: unknown) {
   return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
+function displayIdentity(row: { title: string; apply_url: string; locations: unknown; companies: unknown }) {
+  const company = relation<{ name?: string }>(row.companies)?.name ?? "";
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return `${normalize(company)}:${normalize(row.title)}:${normalize(firstLocation(row.locations))}` || row.apply_url;
+}
+
 export async function getJobsForCurrentUser(): Promise<Job[]> {
   const supabase = await createServerSupabaseClient();
   if (!supabase) return demoJobs;
@@ -65,14 +71,33 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
   const { data: rows, error } = await supabase
     .from("jobs")
     .select(
-      "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, companies(name), job_sources(platform)",
+      "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, last_verified_at, companies(name), job_sources(platform)",
     )
     .is("closed_at", null)
     .order("posted_at", { ascending: false, nullsFirst: false })
     .limit(50);
   if (error || !rows?.length) return demoJobs;
 
-  const jobIds = rows.map((row) => row.id);
+  const { data: feedbackRows } = await supabase
+    .from("job_feedback")
+    .select("job_id, feedback")
+    .eq("user_id", user.id)
+    .in("job_id", rows.map((row) => row.id));
+  const feedbackByJob = new Map(
+    (feedbackRows ?? []).map((feedback) => [feedback.job_id, feedback.feedback as Job["feedback"]]),
+  );
+  const seen = new Set<string>();
+  const uniqueRows = rows
+    .filter((row) => !["not_relevant", "hidden"].includes(feedbackByJob.get(row.id) ?? ""))
+    .filter((row) => {
+      const key = displayIdentity(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 20);
+
+  const jobIds = uniqueRows.map((row) => row.id);
   const { data: matchRows } = await supabase
     .from("job_matches")
     .select("job_id, score, explanation")
@@ -80,7 +105,7 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
     .in("job_id", jobIds);
   const matches = new Map((matchRows ?? []).map((match) => [match.job_id, match]));
 
-  return rows.map((row): Job => {
+  return uniqueRows.map((row): Job => {
     const company = relation<{ name?: string }>(row.companies)?.name ?? "Unknown company";
     const source = sourceName(relation<{ platform?: string }>(row.job_sources)?.platform);
     const match = matches.get(row.id);
@@ -111,6 +136,8 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
       description: row.description ?? "View the original posting for the complete role description.",
       applyUrl: row.apply_url,
       status: "open",
+      lastVerifiedAt: row.last_verified_at ?? undefined,
+      feedback: feedbackByJob.get(row.id),
     };
   });
 }
@@ -126,7 +153,7 @@ export async function getJobById(id: string): Promise<Job | null> {
   const { data: row, error } = await supabase
     .from("jobs")
     .select(
-      "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, companies(name), job_sources(platform)",
+      "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, last_verified_at, companies(name), job_sources(platform)",
     )
     .eq("id", id)
     .is("closed_at", null)
@@ -169,5 +196,6 @@ export async function getJobById(id: string): Promise<Job | null> {
     description: row.description ?? "View the original posting for the complete role description.",
     applyUrl: row.apply_url,
     status: "open",
+    lastVerifiedAt: row.last_verified_at ?? undefined,
   };
 }

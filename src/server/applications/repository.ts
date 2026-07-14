@@ -35,7 +35,7 @@ export async function getApplicationsForCurrentUser(): Promise<Application[]> {
 
   const { data: rows, error } = await supabase
     .from("applications")
-    .select("id, job_id, state, current_step, updated_at, jobs(title, companies(name), job_sources(platform))")
+    .select("id, job_id, state, current_step, updated_at, failure_code, failure_message, jobs(title, apply_url, companies(name), job_sources(platform))")
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false })
     .limit(50);
@@ -44,6 +44,7 @@ export async function getApplicationsForCurrentUser(): Promise<Application[]> {
   return rows.map((row): Application => {
     const job = relation<{
       title?: string;
+      apply_url?: string;
       companies?: unknown;
       job_sources?: unknown;
     }>(row.jobs);
@@ -55,11 +56,14 @@ export async function getApplicationsForCurrentUser(): Promise<Application[]> {
       company,
       role: job?.title ?? "Job application",
       state,
+      failureCode: row.failure_code ?? undefined,
+      failureMessage: row.failure_message ?? undefined,
+      applyUrl: job?.apply_url ?? undefined,
       updatedLabel: new Date(row.updated_at).toLocaleString("en-US", {
         month: "short",
         day: "numeric",
         hour: "numeric",
-        minute: "2-digit",
+        minute: "numeric",
       }),
       source: sourceName(relation<{ platform?: string }>(job?.job_sources)?.platform),
       nextAction:

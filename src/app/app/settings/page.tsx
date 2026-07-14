@@ -1,10 +1,12 @@
 import { Bell, Database, Mail, ShieldCheck, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { DataExportButton, DeleteAccountButton } from "@/features/settings/components/account-data-controls";
+import { PrivacyControls } from "@/features/settings/components/privacy-controls";
+import { createServerSupabaseClient } from "@/server/supabase/server";
 
 const notifications = [
   { id: "new-matches", label: "New match digest", description: "A concise daily email with your strongest new roles." },
@@ -12,7 +14,9 @@ const notifications = [
   { id: "application-status", label: "Application updates", description: "Submission confirmations and status changes." },
 ];
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = supabase ? await supabase.auth.getUser() : { data: { user: null } };
   return (
     <div className="space-y-7">
       <PageHeader
@@ -51,22 +55,7 @@ export default function SettingsPage() {
                 <p className="mt-1 text-sm text-muted-foreground">Set how long application artifacts are retained.</p>
               </div>
             </div>
-            <div className="mt-6 space-y-5">
-              <div className="flex items-center justify-between gap-5 rounded-xl border p-4">
-                <div>
-                  <Label htmlFor="session-recordings">Retain automation recordings</Label>
-                  <p className="mt-1 text-sm text-muted-foreground">Keep redacted session evidence for 7 days.</p>
-                </div>
-                <Switch id="session-recordings" defaultChecked />
-              </div>
-              <div className="flex items-center justify-between gap-5 rounded-xl border p-4">
-                <div>
-                  <Label htmlFor="improve-matching">Use outcomes to improve my matching</Label>
-                  <p className="mt-1 text-sm text-muted-foreground">Use your saves and dismissals only for your feed.</p>
-                </div>
-                <Switch id="improve-matching" defaultChecked />
-              </div>
-            </div>
+            <PrivacyControls />
           </Card>
         </div>
 
@@ -74,7 +63,7 @@ export default function SettingsPage() {
           <Card className="p-5">
             <Mail className="size-5 text-primary" />
             <h2 className="mt-4 font-heading text-lg font-bold">Account email</h2>
-            <p className="mt-2 text-sm text-muted-foreground">alex@example.com</p>
+            <p className="mt-2 break-all text-sm text-muted-foreground">{user?.email ?? "Demo account"}</p>
             <Badge variant="secondary" className="mt-3 text-emerald-700">
               Verified
             </Badge>
@@ -85,9 +74,7 @@ export default function SettingsPage() {
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Export your reviewed profile, saved jobs, and application history.
             </p>
-            <Button variant="outline" className="mt-5 w-full rounded-full">
-              Request export
-            </Button>
+            <DataExportButton />
           </Card>
           <Card className="border-destructive/25 p-5">
             <Trash2 className="size-5 text-destructive" />
@@ -95,9 +82,7 @@ export default function SettingsPage() {
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               Permanently delete your profile, resumes, saved jobs, and application data.
             </p>
-            <Button variant="destructive" className="mt-5 w-full rounded-full">
-              Delete my account
-            </Button>
+            <DeleteAccountButton />
           </Card>
         </aside>
       </div>

@@ -23,7 +23,7 @@ export default async function JobsPage() {
             Welcome back, {firstName}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Showing 1–{Math.min(10, jobs.length)} of {jobs.length} matched jobs.
+            Showing 1–{Math.min(6, jobs.length)} of {jobs.length} matched jobs.
           </p>
         </div>
         <Button render={<Link href="/app/applications" />} variant="outline">

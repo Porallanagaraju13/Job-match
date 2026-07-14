@@ -1,7 +1,4 @@
-import "server-only";
-
-import type { ExtractedProfile } from "@/server/resumes/extract-profile";
-import { extractedProfileSchema } from "@/server/resumes/extract-profile";
+import { extractedProfileSchema, type ExtractedProfile } from "@/server/resumes/profile-schema";
 import { inferTargetRoles } from "@/server/resumes/role-inference";
 
 const skillCatalog = [
@@ -338,6 +335,7 @@ function extractExperience(lines: string[]) {
     const nextLine = source[index + 1] ?? "";
     const previousLine = source[index - 1] ?? "";
     const dateRange = findDateRange(`${line} ${nextLine}`);
+    if (!section && !dateRange) continue;
     const split = splitTitleCompany(line);
     let title = split.title;
     let company = split.company;

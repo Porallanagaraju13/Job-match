@@ -1,6 +1,6 @@
 import "server-only";
 
-import { inflateRawSync, inflateSync } from "node:zlib";
+import { inflateRawSync } from "node:zlib";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
 
@@ -41,67 +41,6 @@ function printableText(bytes: Uint8Array) {
     .replace(/[ \t\f\v]+/g, " ");
 }
 
-function decodePdfLiteral(value: string) {
-  return value
-    .replace(/\\n/g, "\n")
-    .replace(/\\r/g, "\r")
-    .replace(/\\t/g, "\t")
-    .replace(/\\b/g, "\b")
-    .replace(/\\f/g, "\f")
-    .replace(/\\([\\()])/g, "$1")
-    .replace(/\\\d{1,3}/g, " ");
-}
-
-function extractPdfStrings(value: string) {
-  const strings: string[] = [];
-  for (const match of value.matchAll(/\((?:\\.|[^\\)]){2,}\)/g)) {
-    strings.push(decodePdfLiteral(match[0].slice(1, -1)));
-  }
-  for (const match of value.matchAll(/<([0-9a-fA-F\s]{8,})>/g)) {
-    const hex = match[1].replace(/\s+/g, "");
-    if (hex.length % 2 !== 0) continue;
-    const decoded = Buffer.from(hex, "hex").toString("utf16le");
-    if (/[a-z]{3,}/i.test(decoded)) strings.push(decoded);
-  }
-  return strings.join("\n");
-}
-
-function extractPdfTextFallback(bytes: Uint8Array) {
-  const buffer = Buffer.from(bytes);
-  const raw = buffer.toString("latin1");
-  const chunks = [extractPdfStrings(raw)];
-  let cursor = 0;
-
-  while (cursor < raw.length) {
-    const streamStart = raw.indexOf("stream", cursor);
-    if (streamStart === -1) break;
-    const streamEnd = raw.indexOf("endstream", streamStart);
-    if (streamEnd === -1) break;
-
-    const dictionaryStart = Math.max(0, raw.lastIndexOf("<<", streamStart));
-    const dictionary = raw.slice(dictionaryStart, streamStart);
-    const dataStart = streamStart + "stream".length + (raw[streamStart + 6] === "\r" ? 2 : 1);
-    const stream = buffer.subarray(dataStart, streamEnd);
-
-    if (dictionary.includes("/FlateDecode")) {
-      try {
-        chunks.push(extractPdfStrings(inflateSync(stream).toString("latin1")));
-      } catch {
-        try {
-          chunks.push(extractPdfStrings(inflateRawSync(stream).toString("latin1")));
-        } catch {
-          // Some PDF streams are images or use unsupported filters.
-        }
-      }
-    }
-
-    cursor = streamEnd + "endstream".length;
-  }
-
-  const text = cleanExtractedText(chunks.join("\n"));
-  return text.length > 80 ? text : cleanExtractedText(`${text}\n${printableText(bytes)}`);
-}
-
 async function extractPdfText(bytes: Uint8Array) {
   let parser: PDFParse | null = null;
   try {
@@ -109,14 +48,14 @@ async function extractPdfText(bytes: Uint8Array) {
     const result = await parser.getText();
     const pageText = result.pages.map((page) => page.text).filter(Boolean).join("\n\n");
     const text = cleanExtractedText(pageText || result.text);
-    if (text.length > 80) return text;
-  } catch {
-    // Fall back to a lightweight text stream reader for PDFs pdf.js cannot decode.
+    return text;
+  } catch (err) {
+    console.error("PDF parsing failed", err);
+    // Return empty string on failure instead of garbled text
+    return "";
   } finally {
     if (parser) await parser.destroy().catch(() => undefined);
   }
-
-  return extractPdfTextFallback(bytes);
 }
 
 type ZipEntry = {

@@ -170,6 +170,9 @@ Fill in only the providers you want to enable:
 | `STRIPE_POWER_PRICE_ID` | Stripe | Optional |
 | `GEMINI_API_KEY` | Google AI | Optional |
 | `GEMINI_MODEL` | Google AI | Optional |
+| `GEMINI_TIMEOUT_MS` | Google AI request timeout | Optional |
+| `RESEND_API_KEY` | Application confirmation email | Optional |
+| `EMAIL_FROM` | Verified confirmation sender | Optional |
 | `INNGEST_EVENT_KEY` | Inngest | Optional |
 | `INNGEST_SIGNING_KEY` | Inngest | Optional |
 | `BROWSERBASE_API_KEY` | Browserbase | Optional |

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { applicationStatus } from "@/features/applications/application-status";
 import { ApplicationReviewPanel } from "@/features/applications/components/application-review-panel";
+import { ApplicationNotes } from "@/features/applications/components/application-notes";
 
 
 import { getApplicationById } from "@/server/applications/repository";
@@ -75,6 +76,7 @@ export default async function ApplicationDetailPage({ params }: { params: Promis
       </Card>
 
       <ApplicationReviewPanel application={application} profile={profile} />
+      <ApplicationNotes applicationId={application.id} />
     </div>
   );
 }

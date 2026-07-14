@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FileText,
   LoaderCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Application, ApplicationState } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 type Filter = "all" | "progress" | "needs_input" | "submitted";
 
@@ -55,6 +57,8 @@ export function ApplicationList({
 
   useEffect(() => {
     if (!startedId) return;
+    // We will rely on real-time updates rather than hardcoded timeout
+    // but we can keep a fallback timeout just in case it doesn't fire.
     const timer = window.setTimeout(() => {
       setItems((current) =>
         current.map((application) =>
@@ -67,9 +71,47 @@ export function ApplicationList({
             : application,
         ),
       );
-    }, 2200);
+    }, 15000);
     return () => window.clearTimeout(timer);
   }, [startedId]);
+
+  useEffect(() => {
+    const supabase = createBrowserSupabaseClient();
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel("public:applications")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "applications" },
+        (payload) => {
+          const updated = payload.new as {
+            id?: string;
+            state?: ApplicationState;
+            failure_code?: string;
+            failure_message?: string;
+          };
+          setItems((current) =>
+            current.map((app) => {
+              if (app.id === updated.id) {
+                return {
+                  ...app,
+                  state: updated.state ?? app.state,
+                  failureCode: updated.failure_code,
+                  failureMessage: updated.failure_message,
+                };
+              }
+              return app;
+            })
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const visibleApplications = useMemo(
     () =>
@@ -92,17 +134,35 @@ export function ApplicationList({
     submitted: items.filter((application) => application.state === "submitted").length,
   };
 
-  function autofill() {
+  async function autofill() {
+    if (!missingFor) return;
     setAutofilling(true);
-    window.setTimeout(() => {
-      setAnswers({
-        english: "Fluent",
-        shift: "Yes",
-        salary: "120000",
-        negotiation: "Yes",
+    try {
+      const response = await fetch("/api/applications/autofill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          applicationId: missingFor.id,
+          missingQuestions: missingQuestions.map((q, i) => ({
+            id: ["english", "shift", "salary", "negotiation"][i],
+            label: q
+          })),
+        }),
       });
+      if (response.ok) {
+        const data = await response.json();
+        setAnswers({
+          english: data.english || "",
+          shift: data.shift || "",
+          salary: data.salary || "",
+          negotiation: data.negotiation || "",
+        });
+      }
+    } catch (error) {
+      console.error("Failed to autofill:", error);
+    } finally {
       setAutofilling(false);
-    }, 650);
+    }
   }
 
   function saveMissingAnswers() {
@@ -191,7 +251,7 @@ export function ApplicationList({
             ) : (
               <ClipboardCheck className="size-4" />
             )}
-            Use profile answers for this application
+            Fill with AI
           </Button>
 
           <div className="mt-3 space-y-5">
@@ -324,18 +384,43 @@ function ApplicationCard({
 
         {application.state === "needs_input" && (
           <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 p-5">
-            <p className="font-semibold">Missing profile fields</p>
-            <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
-              {missingQuestions.map((question) => (
-                <li key={question}>Select the appropriate answer for “{question}”</li>
-              ))}
-            </ul>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <Button onClick={onFillMissing}>Fill missing data</Button>
-              <Button render={<Link href="/app/profile" />} variant="outline">
-                Edit full profile
-              </Button>
-            </div>
+            {application.failureCode === "BROWSERBASE_ERROR" ? (
+              <>
+                <div className="flex items-center gap-2 font-semibold text-amber-800">
+                  <AlertTriangle className="size-5" />
+                  Automation fallback required
+                </div>
+                <p className="mt-2 text-sm text-amber-800/80">
+                  We could not automatically scan the application form. You can complete the application manually.
+                </p>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {application.applyUrl ? (
+                    <Button render={<a href={application.applyUrl} target="_blank" rel="noreferrer" />}>
+                      Open manual application
+                    </Button>
+                  ) : (
+                    <Button render={<Link href={`/app/jobs/${application.jobId}`} />}>
+                      View job details
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">Missing profile fields</p>
+                <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">
+                  {missingQuestions.map((question) => (
+                    <li key={question}>Select the appropriate answer for “{question}”</li>
+                  ))}
+                </ul>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <Button onClick={onFillMissing}>Fill with AI</Button>
+                  <Button render={<Link href="/app/profile" />} variant="outline">
+                    Edit full profile
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

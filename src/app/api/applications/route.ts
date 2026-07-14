@@ -40,8 +40,9 @@ async function markApplicationReady({
     await supabase
       .from("applications")
       .update({
-        state: "ready_for_review",
-        current_step: "review",
+        state: "needs_input",
+        current_step: "manual_fallback",
+        failure_code: "BROWSERBASE_ERROR",
         failure_message:
           error instanceof Error
             ? error.message
@@ -147,5 +148,30 @@ export async function PATCH(request: Request) {
     .eq("id", parsed.data.applicationId)
     .eq("user_id", user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Send confirmation email/notification when application is submitted
+  if (parsed.data.state === "submitted") {
+    const { data: appData } = await supabase
+      .from("applications")
+      .select("id, jobs(title, apply_url, companies(name), job_sources(platform))")
+      .eq("id", parsed.data.applicationId)
+      .single();
+
+    const job = appData?.jobs as unknown as {
+      title?: string;
+      companies?: { name?: string } | { name?: string }[] | null;
+      job_sources?: { platform?: string } | null;
+    } | null;
+
+    const { sendApplicationConfirmation } = await import("@/server/applications/send-confirmation");
+    await sendApplicationConfirmation({
+      userId: user.id,
+      applicationId: parsed.data.applicationId,
+      company: Array.isArray(job?.companies) ? job.companies[0]?.name : job?.companies?.name,
+      role: job?.title,
+      source: (job?.job_sources as { platform?: string } | null)?.platform,
+    }).catch((err) => console.error("[applications/PATCH] confirmation error:", err));
+  }
+
   return NextResponse.json({ mode: "supabase", state: parsed.data.state });
 }

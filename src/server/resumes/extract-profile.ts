@@ -1,60 +1,13 @@
 import "server-only";
 
 import { GoogleGenAI } from "@google/genai";
-import { z } from "zod";
+import { extractedProfileSchema, type ExtractedProfile } from "@/server/resumes/profile-schema";
 import { extractProfileFromText } from "@/server/resumes/text-profile";
 
-export const extractedProfileSchema = z.object({
-  fullName: z.string().default(""),
-  headline: z.string().default(""),
-  email: z.string().email().or(z.literal("")),
-  phone: z.string().default(""),
-  location: z.string().default(""),
-  summary: z.string().default(""),
-  skills: z.array(z.string()).default([]),
-  targetRoles: z.array(z.string()).default([]),
-  experiences: z
-    .array(
-      z.object({
-        company: z.string(),
-        title: z.string(),
-        startDate: z.string().nullable(),
-        endDate: z.string().nullable(),
-        description: z.string().default(""),
-      }),
-    )
-    .default([]),
-  education: z
-    .array(
-      z.object({
-        institution: z.string(),
-        degree: z.string().default(""),
-        fieldOfStudy: z.string().default(""),
-      }),
-    )
-    .default([]),
-  projects: z
-    .array(
-      z.object({
-        name: z.string(),
-        description: z.string().default(""),
-        link: z.string().default(""),
-      }),
-    )
-    .default([]),
-  certifications: z
-    .array(
-      z.object({
-        name: z.string(),
-        issuer: z.string().default(""),
-        date: z.string().nullable(),
-      }),
-    )
-    .default([]),
-  confidence: z.record(z.string(), z.number().min(0).max(1)).default({}),
-});
+export { extractedProfileSchema } from "@/server/resumes/profile-schema";
+export type { ExtractedProfile } from "@/server/resumes/profile-schema";
 
-export type ExtractedProfile = z.infer<typeof extractedProfileSchema>;
+export const RESUME_EXTRACTION_PROMPT_VERSION = "resume-extraction-v2";
 
 const profileJsonSchema = {
   type: "object",
@@ -244,12 +197,15 @@ export async function extractProfileFromResume({
             text: [
               "Extract a factual candidate profile from this resume text.",
               "The text was already extracted locally from the uploaded file.",
-              "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
+              "Extract exact values as written — do not paraphrase, rephrase, or infer missing information.",
+              "Include all phone number digits including country code exactly as shown.",
+              "Copy the email address character-for-character.",
+              "Do not infer work authorization, demographic attributes, protected characteristics, or credentials.",
               "Use empty strings, empty arrays, or null dates when evidence is absent.",
               "Keep experience descriptions concise and faithful to the document.",
               "Return every resume section that is present, including projects, certifications, education, links, and achievements.",
               "Set targetRoles to accurate job titles supported by the candidate's resume evidence.",
-              `Resume text:\n${textHint!.slice(0, 60_000)}`,
+              `Resume text:\n${textHint!.slice(0, 80_000)}`,
             ].join(" "),
           },
         ]
@@ -263,7 +219,10 @@ export async function extractProfileFromResume({
           {
             text: [
               "Extract a factual candidate profile from this resume.",
-              "Do not infer missing contact details, work authorization, demographic attributes, protected characteristics, or credentials.",
+              "Extract exact values as written — do not paraphrase, rephrase, or infer missing information.",
+              "Include all phone number digits including country code exactly as shown.",
+              "Copy the email address character-for-character.",
+              "Do not infer work authorization, demographic attributes, protected characteristics, or credentials.",
               "Use empty strings, empty arrays, or null dates when evidence is absent.",
               "Keep experience descriptions concise and faithful to the document.",
               "Return every resume section that is present, including projects, certifications, education, links, and achievements.",
@@ -272,7 +231,7 @@ export async function extractProfileFromResume({
           },
         ];
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+      model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
       contents: [
         {
           role: "user",
@@ -280,12 +239,19 @@ export async function extractProfileFromResume({
         },
       ],
       config: {
+        httpOptions: { timeout: Number(process.env.GEMINI_TIMEOUT_MS ?? 20_000) },
         responseMimeType: "application/json",
         responseJsonSchema: profileJsonSchema,
         temperature: 0.1,
       },
     });
     if (!response.text) throw new Error("Gemini returned an empty extraction");
+    console.info("Resume AI extraction completed", {
+      promptVersion: RESUME_EXTRACTION_PROMPT_VERSION,
+      model: process.env.GEMINI_MODEL ?? "gemini-2.0-flash",
+      inputTokens: response.usageMetadata?.promptTokenCount ?? null,
+      outputTokens: response.usageMetadata?.candidatesTokenCount ?? null,
+    });
     return mergeWithLocalDraft(extractedProfileSchema.parse(JSON.parse(response.text)), localDraft);
   } catch (error) {
     // Log error for debugging while maintaining fallback behavior

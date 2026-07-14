@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { demoProfile } from "@/lib/demo-data";
 import type { ProfileDraft } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { qualityFieldLabels } from "@/server/resumes/resume-quality";
 
 const tabs = ["Basics", "Skills", "Experience", "Education", "Projects", "Certifications"] as const;
 
@@ -30,6 +31,10 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
     location: initialProfile.location,
     summary: initialProfile.summary,
   });
+  const quality = initialProfile.extractionQuality;
+  const confidenceScore = quality?.confidenceScore ?? 100;
+  const reviewFields = quality?.reviewFields ?? [];
+  const needsReview = (field: string) => reviewFields.includes(field);
 
   function addSkill() {
     const value = newSkill.trim();
@@ -67,10 +72,16 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
           <div className="flex-1">
             <div className="flex items-center justify-between">
               <p className="font-semibold">Extraction confidence</p>
-              <span className="font-heading font-bold text-primary">92%</span>
+              <span className="font-heading font-bold text-primary">{confidenceScore}%</span>
             </div>
-            <Progress value={92} className="mt-2 h-1.5" />
-            <p className="mt-2 text-xs text-muted-foreground">2 fields were marked for review.</p>
+            <Progress value={confidenceScore} className="mt-2 h-1.5" />
+            <p className="mt-2 text-xs text-muted-foreground">
+              {reviewFields.length
+                ? `${reviewFields.length} fields need your review: ${reviewFields
+                    .map((field) => qualityFieldLabels[field as keyof typeof qualityFieldLabels] ?? field)
+                    .join(", ")}.`
+                : "All critical fields were extracted with good confidence."}
+            </p>
           </div>
         </div>
 
@@ -101,6 +112,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 name="fullName"
                 value={profile.fullName}
                 onChange={(event) => setProfile((current) => ({ ...current, fullName: event.target.value }))}
+                className={cn(needsReview("fullName") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
             <div className="space-y-2">
@@ -110,6 +122,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 name="headline"
                 value={profile.headline}
                 onChange={(event) => setProfile((current) => ({ ...current, headline: event.target.value }))}
+                className={cn(needsReview("headline") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
             <div className="space-y-2">
@@ -120,6 +133,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 type="email"
                 value={profile.email}
                 onChange={(event) => setProfile((current) => ({ ...current, email: event.target.value }))}
+                className={cn(needsReview("email") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
             <div className="space-y-2">
@@ -129,6 +143,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 name="phone"
                 value={profile.phone}
                 onChange={(event) => setProfile((current) => ({ ...current, phone: event.target.value }))}
+                className={cn(needsReview("phone") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
@@ -138,6 +153,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 name="location"
                 value={profile.location}
                 onChange={(event) => setProfile((current) => ({ ...current, location: event.target.value }))}
+                className={cn(needsReview("location") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
@@ -148,6 +164,7 @@ export function ProfileReviewForm({ initialProfile = demoProfile }: { initialPro
                 value={profile.summary}
                 onChange={(event) => setProfile((current) => ({ ...current, summary: event.target.value }))}
                 rows={5}
+                className={cn(needsReview("summary") && "border-amber-500 bg-amber-50/50")}
               />
             </div>
           </div>

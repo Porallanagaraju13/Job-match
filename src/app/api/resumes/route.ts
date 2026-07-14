@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { inngest } from "@/server/inngest/client";
-import { extractProfileFromResume } from "@/server/resumes/extract-profile";
 import { extractProfileFromText } from "@/server/resumes/text-profile";
 import { extractResumeText } from "@/server/resumes/text-extraction";
+import { assessResumeExtraction } from "@/server/resumes/resume-quality";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
 const allowedMimeTypes = new Set([
@@ -62,12 +62,14 @@ export async function POST(request: Request) {
       originalName: file.name,
     });
     const extraction = extractProfileFromText(resumeText, file.name);
+    const quality = assessResumeExtraction(extraction);
     return NextResponse.json({
       id,
       mode: "demo",
       status: "review_required",
       sha256,
       extraction,
+      quality,
     });
   }
 
@@ -75,6 +77,19 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Sign in before uploading a resume." }, { status: 401 });
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count: recentUploadCount } = await supabase
+    .from("resumes")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneHourAgo);
+  if ((recentUploadCount ?? 0) >= 10) {
+    return NextResponse.json(
+      { error: "Resume upload limit reached. Try again in about an hour." },
+      { status: 429, headers: { "Retry-After": "3600" } },
+    );
+  }
 
   const resumeId = randomUUID();
   const storagePath = `${user.id}/${resumeId}/original.${extension}`;
@@ -106,45 +121,47 @@ export async function POST(request: Request) {
 
   const resumeText = await extractResumeText({ bytes, mimeType, originalName: file.name });
   const localExtraction = extractProfileFromText(resumeText, file.name);
+  const quality = assessResumeExtraction(localExtraction);
   await supabase.from("resume_extractions").insert({
     user_id: user.id,
     resume_id: resumeId,
-    parser_version: "local-text-v1",
+    parser_version: "local-text-v2",
     raw_data: localExtraction,
     confidence_map: localExtraction.confidence,
   });
 
   const { upsertProfileFromExtraction } = await import("@/server/profile/repository");
   await upsertProfileFromExtraction(supabase, user.id, localExtraction);
-  await supabase.from("resumes").update({ status: "review_required" }).eq("id", resumeId);
-  await supabase.from("profiles").update({ onboarding_state: "review_required" }).eq("id", user.id);
 
+  let status: "processing" | "review_required" = "review_required";
   if (process.env.INNGEST_EVENT_KEY) {
-    await inngest.send({
-      name: "jobbuddy/resume.uploaded",
-      data: { resumeId, userId: user.id, originalName: file.name, textLength: resumeText.length },
-    });
+    try {
+      await inngest.send({
+        name: "jobbuddy/resume.uploaded",
+        data: {
+          resumeId,
+          userId: user.id,
+          originalName: file.name,
+          textLength: resumeText.length,
+          needsAiEnhancement: quality.needsAiEnhancement,
+        },
+      });
+      status = "processing";
+    } catch (error) {
+      console.error("Could not enqueue resume enhancement; using local extraction:", error);
+    }
   } else {
-    const extraction = await extractProfileFromResume({
-      originalName: file.name,
-      bytes,
-      mimeType,
-      textHint: resumeText,
-    });
-    await supabase.from("resume_extractions").insert({
-      user_id: user.id,
-      resume_id: resumeId,
-      parser_version: "gemini-v1",
-      raw_data: extraction,
-      confidence_map: extraction.confidence,
-    });
-    
-    // Automatically map extracted data to profile
-    await upsertProfileFromExtraction(supabase, user.id, extraction);
-
-    await supabase.from("resumes").update({ status: "review_required" }).eq("id", resumeId);
-    await supabase.from("profiles").update({ onboarding_state: "review_required" }).eq("id", user.id);
+    // Local parsing is the complete synchronous path. AI enhancement must run through
+    // Inngest so an unavailable/slow model never keeps the upload request open.
+    console.warn("INNGEST_EVENT_KEY is not configured; returning the local resume extraction.");
   }
 
-  return NextResponse.json({ id: resumeId, mode: "supabase", status: "processing" }, { status: 202 });
+  if (status === "review_required") {
+    await Promise.all([
+      supabase.from("resumes").update({ status }).eq("id", resumeId),
+      supabase.from("profiles").update({ onboarding_state: status }).eq("id", user.id),
+    ]);
+  }
+
+  return NextResponse.json({ id: resumeId, mode: "supabase", status, quality }, { status: 202 });
 }

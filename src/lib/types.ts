@@ -23,6 +23,8 @@ export type Job = {
   description: string;
   applyUrl: string;
   status: JobStatus;
+  lastVerifiedAt?: string;
+  feedback?: "relevant" | "not_relevant" | "hidden";
 };
 
 export type ApplicationState =
@@ -42,6 +44,9 @@ export type Application = {
   updatedLabel: string;
   source: JobSource;
   nextAction: string;
+  failureCode?: string;
+  failureMessage?: string;
+  applyUrl?: string;
 };
 
 export type Activity = {
@@ -83,4 +88,12 @@ export type ProfileDraft = {
     issuer: string;
     date: string | null;
   }>;
+  extractionQuality?: {
+    completenessScore: number;
+    confidenceScore: number;
+    missingFields: string[];
+    lowConfidenceFields: string[];
+    reviewFields: string[];
+    needsAiEnhancement: boolean;
+  };
 };

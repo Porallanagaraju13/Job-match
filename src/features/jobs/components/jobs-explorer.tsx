@@ -13,6 +13,10 @@ import {
   LoaderCircle,
   MapPin,
   Search,
+  SlidersHorizontal,
+  ThumbsDown,
+  ThumbsUp,
+  EyeOff,
   Wifi,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -92,6 +96,13 @@ export function JobsExplorer({
   const { isSaved, toggleSaved } = useSavedJobs();
   const [query, setQuery] = useState("");
   const [sources, setSources] = useState<JobSource[]>([]);
+  const [workMode, setWorkMode] = useState("All");
+  const [minimumMatch, setMinimumMatch] = useState(0);
+  const [sortBy, setSortBy] = useState<"relevance" | "newest">("relevance");
+  const [dismissedJobs, setDismissedJobs] = useState<Set<string>>(() => new Set());
+  const [feedbackByJob, setFeedbackByJob] = useState<Record<string, Job["feedback"]>>(() =>
+    Object.fromEntries(jobs.map((job) => [job.id, job.feedback])),
+  );
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [starting, setStarting] = useState(false);
   const completeness = profileScore(profile, hasResume);
@@ -117,7 +128,10 @@ export function JobsExplorer({
   const visibleJobs = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return jobs
+      .filter((job) => !dismissedJobs.has(job.id))
       .filter((job) => activeSources.includes(job.source))
+      .filter((job) => workMode === "All" || job.workMode === workMode)
+      .filter((job) => job.matchScore >= minimumMatch)
       .filter(
         (job) =>
           !normalizedQuery ||
@@ -126,8 +140,13 @@ export function JobsExplorer({
             .toLowerCase()
             .includes(normalizedQuery),
       )
-      .sort((a, b) => b.matchScore - a.matchScore);
-  }, [jobs, query, activeSources]);
+      .sort((a, b) => {
+        if (sortBy === "relevance") return b.matchScore - a.matchScore;
+        const timeDiff = new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime();
+        if (timeDiff !== 0) return timeDiff;
+        return b.matchScore - a.matchScore;
+      });
+  }, [jobs, query, activeSources, workMode, minimumMatch, sortBy, dismissedJobs]);
 
   function toggleSource(source: JobSource) {
     const currentSources = sources.length ? sources : availablePlatforms.map((item) => item.source);
@@ -154,6 +173,28 @@ export function JobsExplorer({
       console.error('Failed to open application URL:', err);
     }
     setSelectedJob(null);
+  }
+
+  async function sendFeedback(job: Job, feedback: "relevant" | "not_relevant" | "hidden") {
+    const previous = feedbackByJob[job.id];
+    setFeedbackByJob((current) => ({ ...current, [job.id]: feedback }));
+    if (feedback !== "relevant") {
+      setDismissedJobs((current) => new Set([...current, job.id]));
+    }
+
+    const response = await fetch("/api/jobs/feedback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jobId: job.id, feedback }),
+    });
+    if (!response.ok) {
+      setFeedbackByJob((current) => ({ ...current, [job.id]: previous }));
+      setDismissedJobs((current) => {
+        const next = new Set(current);
+        next.delete(job.id);
+        return next;
+      });
+    }
   }
 
   async function applyAutomatically() {
@@ -220,17 +261,53 @@ export function JobsExplorer({
           </section>
 
           <section>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <h3 className="font-heading text-xl font-semibold">Top Job Matches</h3>
-              <div className="relative w-full sm:max-w-sm">
-                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="search-jobs"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="h-11 bg-white pl-9"
-                  placeholder="Search jobs..."
-                />
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="search-jobs"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="h-11 bg-white pl-9"
+                    placeholder="Search jobs..."
+                  />
+                </div>
+                <label className="relative">
+                  <span className="sr-only">Work mode</span>
+                  <select
+                    value={workMode}
+                    onChange={(event) => setWorkMode(event.target.value)}
+                    className="h-11 rounded-md border bg-white px-3 text-sm"
+                  >
+                    <option>All</option>
+                    <option>Remote</option>
+                    <option>Hybrid</option>
+                    <option>On-site</option>
+                  </select>
+                </label>
+                <label className="relative">
+                  <span className="sr-only">Minimum match</span>
+                  <select
+                    value={minimumMatch}
+                    onChange={(event) => setMinimumMatch(Number(event.target.value))}
+                    className="h-11 rounded-md border bg-white px-3 text-sm"
+                  >
+                    <option value={0}>Any match</option>
+                    <option value={70}>70%+</option>
+                    <option value={80}>80%+</option>
+                    <option value={90}>90%+</option>
+                  </select>
+                </label>
+                <Button
+                  variant="outline"
+                  className="h-11 bg-white"
+                  onClick={() => setSortBy((current) => (current === "relevance" ? "newest" : "relevance"))}
+                >
+                  <SlidersHorizontal className="size-4" />
+                  {sortBy === "relevance" ? "Best match" : "Newest"}
+                </Button>
               </div>
             </div>
 
@@ -285,6 +362,11 @@ export function JobsExplorer({
                           <Clock3 className="size-3" />
                           Posted {job.postedLabel}
                         </p>
+                        {job.lastVerifiedAt && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Verified {new Date(job.lastVerifiedAt).toLocaleDateString()}
+                          </p>
+                        )}
                       </div>
 
                       <div className="grid gap-2">
@@ -299,6 +381,34 @@ export function JobsExplorer({
                           <Bookmark className={cn("size-4", saved && "fill-current")} />
                           {saved ? "Saved" : "Save"}
                         </Button>
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Mark ${job.title} relevant`}
+                            aria-pressed={feedbackByJob[job.id] === "relevant"}
+                            className={cn(feedbackByJob[job.id] === "relevant" && "text-emerald-700")}
+                            onClick={() => void sendFeedback(job, "relevant")}
+                          >
+                            <ThumbsUp className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Mark ${job.title} not relevant`}
+                            onClick={() => void sendFeedback(job, "not_relevant")}
+                          >
+                            <ThumbsDown className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Hide ${job.title}`}
+                            onClick={() => void sendFeedback(job, "hidden")}
+                          >
+                            <EyeOff className="size-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </Card>
@@ -427,9 +537,9 @@ export function JobsExplorer({
             >
               {starting ? <LoaderCircle className="size-6 animate-spin" /> : <ClipboardCheck className="size-6" />}
               <span>
-                <span className="block font-semibold">Prepare application</span>
+                <span className="block font-semibold">Apply with AI</span>
                 <span className="mt-1 block text-sm opacity-70">
-                  Prepare the application using your saved profile details
+                  Auto-fill and submit using your profile & resume
                 </span>
               </span>
             </button>

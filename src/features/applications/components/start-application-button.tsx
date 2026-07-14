@@ -27,7 +27,7 @@ export function StartApplicationButton({ jobId }: { jobId: string }) {
   return (
     <Button size="lg" className="h-11 px-6" onClick={startApplication} disabled={loading}>
       {loading ? <LoaderCircle className="size-4 animate-spin" /> : <FileText className="size-4" />}
-      {loading ? "Preparing…" : "Prepare application"}
+      {loading ? "Applying…" : "Apply with AI"}
     </Button>
   );
 }

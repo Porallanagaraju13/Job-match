@@ -2,7 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ProfileDraft } from "@/lib/types";
-import { extractedProfileSchema } from "@/server/resumes/extract-profile";
+import { extractedProfileSchema } from "@/server/resumes/profile-schema";
+import { assessResumeExtraction } from "@/server/resumes/resume-quality";
 import { inferTargetRoles } from "@/server/resumes/role-inference";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
@@ -139,6 +140,7 @@ export async function getProfileDraftForCurrentUser(): Promise<ProfileDraft> {
     education: storedEducation.length ? storedEducation : extractedValue?.education ?? [],
     projects: extractedValue?.projects ?? [],
     certifications: extractedValue?.certifications ?? [],
+    extractionQuality: extractedValue ? assessResumeExtraction(extractedValue) : undefined,
   };
 }
 

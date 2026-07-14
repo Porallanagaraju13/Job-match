@@ -45,7 +45,7 @@ const preferencesSchema = z.object({
 
 export async function GET() {
   const defaultPreferences = {
-    targetRoles: ["Senior Product Manager", "Product Lead", "Group Product Manager"],
+    targetRoles: [] as string[],
     preferredLocations: ["San Francisco, CA"],
     workModes: ["Remote", "Hybrid"],
     seniorityLevels: ["Senior", "Lead"],

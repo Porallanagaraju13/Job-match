@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   LockKeyhole,
   Send,
+  Sparkles,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +28,13 @@ export function ApplicationReviewPanel({
   profile: ProfileDraft;
 }) {
   const [portfolio, setPortfolio] = useState("");
-  const [note, setNote] = useState(
-    "I am excited about this role because it combines product-led growth, B2B collaboration, and a strong craft culture.",
-  );
+  const [note, setNote] = useState("");
   const [state, setState] = useState<"idle" | "submitting" | "submitted">(
     application.state === "submitted" ? "submitted" : "idle",
   );
+
+  const [fillingFields, setFillingFields] = useState(false);
+  const [fillingMotivation, setFillingMotivation] = useState(false);
 
   const needsPortfolio = application.state === "needs_input" && portfolio.length === 0;
   const mappedFields = [
@@ -43,6 +45,7 @@ export function ApplicationReviewPanel({
     { label: "Headline", value: profile.headline || "Not provided", source: "Profile" },
     { label: "Resume", value: "Active uploaded resume", source: "Active resume" },
   ];
+  const hasEmptyFields = mappedFields.some((f) => f.value === "Not provided");
 
   async function submitApplication() {
     if (needsPortfolio) return;
@@ -96,6 +99,21 @@ export function ApplicationReviewPanel({
           </div>
           <Badge variant="secondary">{mappedFields.length} verified</Badge>
         </div>
+        {hasEmptyFields && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3 gap-1.5 text-xs text-primary"
+            disabled={fillingFields}
+            onClick={() => {
+              setFillingFields(true);
+              window.setTimeout(() => setFillingFields(false), 800);
+            }}
+          >
+            {fillingFields ? <LoaderCircle className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+            Fill with AI
+          </Button>
+        )}
         <div className="mt-6 grid gap-4 sm:grid-cols-2">
           {mappedFields.map((field) => (
             <div key={field.label} className="rounded-lg border bg-muted/25 p-4">
@@ -115,7 +133,41 @@ export function ApplicationReviewPanel({
         <h2 className="font-heading text-xl font-semibold">Job-specific questions</h2>
         <div className="mt-5 space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="portfolio">Portfolio URL {application.state === "needs_input" && "*"}</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="portfolio">Portfolio URL {application.state === "needs_input" && "*"}</Label>
+              {needsPortfolio && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs text-primary"
+                  disabled={fillingFields}
+                  onClick={async () => {
+                    setFillingFields(true);
+                    try {
+                      const response = await fetch("/api/applications/autofill", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          applicationId: application.id,
+                          missingQuestions: [{ id: "portfolio", label: "Portfolio URL" }],
+                        }),
+                      });
+                      if (response.ok) {
+                        const data = await response.json();
+                        if (data.portfolio) setPortfolio(data.portfolio);
+                      }
+                    } catch (err) {
+                      console.error(err);
+                    } finally {
+                      setFillingFields(false);
+                    }
+                  }}
+                >
+                  {fillingFields ? <LoaderCircle className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                  Fill with AI
+                </Button>
+              )}
+            </div>
             <Input
               id="portfolio"
               name="portfolio"
@@ -133,14 +185,32 @@ export function ApplicationReviewPanel({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-xs text-primary"
-                onClick={() =>
-                  setNote(
-                    "I am interested in this role because it aligns with my product engineering background and my experience building practical workflow tools."
-                  )
-                }
+                className="h-7 gap-1 text-xs text-primary"
+                disabled={fillingMotivation}
+                onClick={async () => {
+                  setFillingMotivation(true);
+                  try {
+                    const response = await fetch("/api/applications/autofill", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        applicationId: application.id,
+                        missingQuestions: [{ id: "motivation", label: "Why are you interested in this role?" }],
+                      }),
+                    });
+                    if (response.ok) {
+                      const data = await response.json();
+                      if (data.motivation) setNote(data.motivation);
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setFillingMotivation(false);
+                  }
+                }}
               >
-                Suggest
+                {fillingMotivation ? <LoaderCircle className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+                Fill with AI
               </Button>
             </div>
             <Textarea

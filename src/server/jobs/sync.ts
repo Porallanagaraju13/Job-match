@@ -91,6 +91,24 @@ function fingerprintFor(parts: string[]) {
   return createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
+function canonicalJobUrl(value: string) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|source$|ref$|referrer$|tracking|trk$)/i.test(key)) url.searchParams.delete(key);
+    }
+    url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return url.toString();
+  } catch {
+    return value.trim();
+  }
+}
+
+function jobIdentity(job: Pick<NormalizedSourceJob, "company" | "title" | "location">) {
+  return fingerprintFor([normalize(job.company), normalize(job.title), normalize(job.location)]);
+}
+
 function sourceUrlFor(canonicalUrl: string) {
   const host = hostname(canonicalUrl);
   return host ? `https://${host}` : canonicalUrl;
@@ -144,9 +162,9 @@ function scoreProviderJob(matchProfile: MatchProfile, job: NormalizedSourceJob) 
 function dedupeProviderJobs(jobs: NormalizedSourceJob[]) {
   const seen = new Set<string>();
   return jobs.filter((job) => {
-    const key = job.applyUrl || `${job.source}:${job.externalId || job.company}:${job.title}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
+    const identities = [`url:${canonicalJobUrl(job.applyUrl)}`, `role:${jobIdentity(job)}`];
+    if (identities.some((key) => seen.has(key))) return false;
+    identities.forEach((key) => seen.add(key));
     return true;
   });
 }
@@ -212,12 +230,14 @@ async function saveMatchedJob({
     if (error) return { error: `Could not save job source: ${error.message}` };
   }
 
-  const externalId = job.externalId || fingerprintFor([job.source, job.company, job.title, job.applyUrl]);
+  const canonicalUrl = canonicalJobUrl(job.applyUrl);
+  const identityFingerprint = jobIdentity(job);
+  const externalId = job.externalId || identityFingerprint;
   const { data: existingJob } = await supabase
     .from("jobs")
     .select("id")
-    .eq("source_id", sourceId)
-    .eq("external_id", externalId)
+    .or(`and(source_id.eq.${sourceId},external_id.eq.${externalId}),fingerprint.eq.${identityFingerprint}`)
+    .limit(1)
     .maybeSingle();
 
   const now = new Date().toISOString();
@@ -236,17 +256,30 @@ async function saveMatchedJob({
       work_mode: job.workMode,
       employment_type: job.employmentType,
       seniority: "Level not specified",
-      apply_url: job.applyUrl,
-      canonical_url: job.applyUrl,
+      apply_url: canonicalUrl,
+      canonical_url: canonicalUrl,
       tags,
       posted_at: job.postedAt ?? now,
       source_updated_at: job.sourceUpdatedAt,
       company_id: companyId,
       source_payload: job.raw,
-      fingerprint: fingerprintFor([job.source, job.company, job.title, job.applyUrl]),
+      fingerprint: identityFingerprint,
       last_seen_at: now,
+      last_verified_at: now,
+      verification_failures: 0,
     });
-    if (error) return { error: `Could not save fetched job: ${error.message}` };
+    if (error?.code === "23505") {
+      const { data: concurrentJob } = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("fingerprint", identityFingerprint)
+        .limit(1)
+        .maybeSingle();
+      jobId = concurrentJob?.id;
+    } else if (error) {
+      return { error: `Could not save fetched job: ${error.message}` };
+    }
+    if (!jobId) return { error: "Could not resolve the canonical job record." };
   } else {
     await supabase
       .from("jobs")
@@ -255,10 +288,14 @@ async function saveMatchedJob({
         description: job.description,
         locations: [job.location],
         work_mode: job.workMode,
-        apply_url: job.applyUrl,
+        apply_url: canonicalUrl,
+        canonical_url: canonicalUrl,
+        fingerprint: identityFingerprint,
         tags,
         closed_at: null,
         last_seen_at: now,
+        last_verified_at: now,
+        verification_failures: 0,
       })
       .eq("id", jobId);
   }

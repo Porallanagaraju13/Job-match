@@ -19,11 +19,14 @@ import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { StartApplicationButton } from "@/features/applications/components/start-application-button";
 import { getJobById } from "@/server/jobs/repository";
+import { analyzeJobFit } from "@/server/matching/analyze-fit";
+import { getProfileDraftForCurrentUser } from "@/server/profile/repository";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const job = await getJobById(id);
+  const [job, profile] = await Promise.all([getJobById(id), getProfileDraftForCurrentUser()]);
   if (!job) notFound();
+  const fit = analyzeJobFit(profile, job);
 
   return (
     <div className="space-y-7">
@@ -78,21 +81,29 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             <div className="mt-8">
               <h2 className="font-heading text-xl font-bold">About the role</h2>
               <p className="mt-4 leading-8 text-muted-foreground">{job.description}</p>
-              <p className="mt-4 leading-8 text-muted-foreground">
-                You will partner across product, design, engineering, and go-to-market teams. The
-                strongest candidates bring structured thinking, strong written communication, and a
-                track record of moving from customer insight to measurable product outcomes.
-              </p>
             </div>
             <div className="mt-8">
-              <h2 className="font-heading text-xl font-bold">What you will do</h2>
-              <ul className="mt-4 space-y-3 text-sm leading-6 text-muted-foreground">
-                {[
-                  "Set a clear product direction and turn it into an outcome-focused roadmap.",
-                  "Work closely with design and engineering from discovery through launch.",
-                  "Use qualitative and quantitative signals to prioritize the highest-value problems.",
-                  "Communicate decisions and tradeoffs clearly across the organization.",
-                ].map((item) => (
+              <h2 className="font-heading text-xl font-bold">Resume alignment</h2>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                  <p className="text-sm font-semibold text-emerald-800">Skills evidenced in your profile</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {fit.matchedSkills.length ? fit.matchedSkills.map((skill) => (
+                      <Badge key={skill} className="border-0 bg-emerald-700 text-white">{skill}</Badge>
+                    )) : <span className="text-sm text-muted-foreground">No explicit keyword overlap detected.</span>}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                  <p className="text-sm font-semibold text-amber-900">Keywords to review</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {fit.missingKeywords.length ? fit.missingKeywords.map((skill) => (
+                      <Badge key={skill} variant="outline" className="border-amber-300">{skill}</Badge>
+                    )) : <span className="text-sm text-muted-foreground">No material keyword gaps detected.</span>}
+                  </div>
+                </div>
+              </div>
+              <ul className="mt-5 space-y-3 text-sm leading-6 text-muted-foreground">
+                {fit.recommendations.map((item) => (
                   <li key={item} className="flex gap-3">
                     <CheckCircle2 className="mt-1 size-4 shrink-0 text-emerald-600" />
                     {item}
@@ -136,6 +147,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                   {reason}
                 </p>
               ))}
+            </div>
+            <div className="mt-5 border-t pt-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium">Detected keyword coverage</span>
+                <span className="font-semibold">{fit.coverageScore}%</span>
+              </div>
+              <Progress value={fit.coverageScore} className="mt-2 h-1.5" />
             </div>
           </Card>
           <Card className="p-5">
