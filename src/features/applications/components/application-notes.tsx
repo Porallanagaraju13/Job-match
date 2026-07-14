@@ -20,16 +20,22 @@ export function ApplicationNotes({ applicationId }: { applicationId: string }) {
   const [content, setContent] = useState("");
   const [followUpAt, setFollowUpAt] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     void fetch(`/api/applications/${applicationId}/notes`, { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload: { notes?: Note[] }) => setNotes(payload.notes ?? []));
+      .then(async (response) => ({ response, payload: await response.json() as { notes?: Note[]; error?: string } }))
+      .then(({ response, payload }) => {
+        if (!response.ok) setError(payload.error ?? "Notes require the pending database migration.");
+        setNotes(payload.notes ?? []);
+      })
+      .catch(() => setError("Application notes could not be loaded."));
   }, [applicationId]);
 
   async function addNote() {
     if (!content.trim()) return;
     setSaving(true);
+    setError("");
     const response = await fetch(`/api/applications/${applicationId}/notes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -38,11 +44,13 @@ export function ApplicationNotes({ applicationId }: { applicationId: string }) {
         followUpAt: followUpAt ? new Date(followUpAt).toISOString() : null,
       }),
     });
-    const payload = (await response.json().catch(() => null)) as { note?: Note } | null;
+    const payload = (await response.json().catch(() => null)) as { note?: Note; error?: string } | null;
     if (response.ok && payload?.note) {
       setNotes((current) => [payload.note!, ...current]);
       setContent("");
       setFollowUpAt("");
+    } else {
+      setError(payload?.error ?? "Notes require the pending database migration.");
     }
     setSaving(false);
   }
@@ -79,6 +87,7 @@ export function ApplicationNotes({ applicationId }: { applicationId: string }) {
         </Button>
       </div>
       <div className="mt-6 space-y-3">
+        {error && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{error}</p>}
         {notes.map((note) => (
           <div key={note.id} className="rounded-lg border bg-muted/20 p-4">
             <p className="text-sm leading-6">{note.content}</p>

@@ -21,22 +21,34 @@ export function PrivacyControls() {
   const [settings, setSettings] = useState(defaults);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     void fetch("/api/privacy", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((payload: { settings?: PrivacySettings }) => payload.settings && setSettings(payload.settings))
+      .then(async (response) => ({ response, payload: await response.json() as { settings?: PrivacySettings; error?: string } }))
+      .then(({ response, payload }) => {
+        if (!response.ok) setError(payload.error ?? "Privacy settings require the pending database migration.");
+        if (payload.settings) setSettings(payload.settings);
+      })
+      .catch(() => setError("Privacy settings could not be loaded."))
       .finally(() => setLoading(false));
   }, []);
 
   async function update(next: PrivacySettings) {
+    const previous = settings;
     setSettings(next);
     setSaving(true);
-    await fetch("/api/privacy", {
+    setError("");
+    const response = await fetch("/api/privacy", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(next),
     });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setSettings(previous);
+      setError(payload?.error ?? "Privacy settings require the pending database migration.");
+    }
     setSaving(false);
   }
 
@@ -86,6 +98,7 @@ export function PrivacyControls() {
         </select>
       </div>
       <p className="h-4 text-right text-xs text-muted-foreground">{saving ? "Saving privacy settings…" : "Settings saved automatically"}</p>
+      {error && <p className="text-right text-xs text-amber-700">{error}</p>}
     </div>
   );
 }

@@ -22,11 +22,18 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Sign in to view privacy settings." }, { status: 401 });
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("user_privacy_settings")
     .select("retain_automation_recordings, improve_personal_matching, resume_retention_days")
     .eq("user_id", user.id)
     .maybeSingle();
+  if (error?.code === "PGRST205") {
+    return NextResponse.json(
+      { error: "Privacy controls are waiting for the database enhancement migration." },
+      { status: 503 },
+    );
+  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({
     settings: data
       ? {
@@ -57,6 +64,12 @@ export async function POST(request: Request) {
     },
     { onConflict: "user_id" },
   );
+  if (error?.code === "PGRST205") {
+    return NextResponse.json(
+      { error: "Privacy controls are waiting for the database enhancement migration." },
+      { status: 503 },
+    );
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ saved: true });
 }

@@ -68,7 +68,7 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
   } = await supabase.auth.getUser();
   if (!user) return demoJobs;
 
-  const { data: rows, error } = await supabase
+  let { data: rows, error } = await supabase
     .from("jobs")
     .select(
       "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, last_verified_at, companies(name), job_sources(platform)",
@@ -76,6 +76,18 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
     .is("closed_at", null)
     .order("posted_at", { ascending: false, nullsFirst: false })
     .limit(50);
+  if (error?.code === "42703") {
+    const legacyResult = await supabase
+      .from("jobs")
+      .select(
+        "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, companies(name), job_sources(platform)",
+      )
+      .is("closed_at", null)
+      .order("posted_at", { ascending: false, nullsFirst: false })
+      .limit(50);
+    rows = legacyResult.data?.map((row) => ({ ...row, last_verified_at: null })) ?? null;
+    error = legacyResult.error;
+  }
   if (error || !rows?.length) return demoJobs;
 
   const { data: feedbackRows } = await supabase
@@ -150,7 +162,7 @@ export async function getJobById(id: string): Promise<Job | null> {
   } = await supabase.auth.getUser();
   if (!user) return demoJobs.find((job) => job.id === id) ?? null;
 
-  const { data: row, error } = await supabase
+  let { data: row, error } = await supabase
     .from("jobs")
     .select(
       "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, last_verified_at, companies(name), job_sources(platform)",
@@ -158,6 +170,18 @@ export async function getJobById(id: string): Promise<Job | null> {
     .eq("id", id)
     .is("closed_at", null)
     .single();
+  if (error?.code === "42703") {
+    const legacyResult = await supabase
+      .from("jobs")
+      .select(
+        "id, external_id, title, description, locations, work_mode, employment_type, seniority, salary_min, salary_max, salary_currency, apply_url, tags, posted_at, companies(name), job_sources(platform)",
+      )
+      .eq("id", id)
+      .is("closed_at", null)
+      .single();
+    row = legacyResult.data ? { ...legacyResult.data, last_verified_at: null } : null;
+    error = legacyResult.error;
+  }
   if (error || !row) return demoJobs.find((job) => job.id === id) ?? null;
 
   const { data: matchRow } = await supabase

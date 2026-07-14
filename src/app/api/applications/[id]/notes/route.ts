@@ -33,6 +33,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .eq("application_id", id)
     .eq("user_id", context.user.id)
     .order("created_at", { ascending: false });
+  if (error?.code === "PGRST205") {
+    return NextResponse.json(
+      { error: "Application notes are waiting for the database enhancement migration." },
+      { status: 503 },
+    );
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ notes: data ?? [] });
 }
@@ -53,6 +59,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     })
     .select("id, content, follow_up_at, completed_at, created_at")
     .single();
+  if (error?.code === "PGRST205") {
+    return NextResponse.json(
+      { error: "Application notes are waiting for the database enhancement migration." },
+      { status: 503 },
+    );
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ note: data }, { status: 201 });
 }

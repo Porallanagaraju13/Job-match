@@ -28,6 +28,12 @@ export async function POST(request: Request) {
     },
     { onConflict: "user_id,job_id" },
   );
+  if (error?.code === "PGRST205") {
+    return NextResponse.json(
+      { error: "Job feedback is waiting for the database enhancement migration." },
+      { status: 503 },
+    );
+  }
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   await supabase.from("activity_events").insert({

@@ -245,7 +245,7 @@ async function saveMatchedJob({
   let jobId = existingJob?.id;
   if (!jobId) {
     jobId = randomUUID();
-    const { error } = await supabase.from("jobs").insert({
+    const jobRecord = {
       id: jobId,
       source_id: sourceId,
       external_id: externalId,
@@ -267,7 +267,15 @@ async function saveMatchedJob({
       last_seen_at: now,
       last_verified_at: now,
       verification_failures: 0,
-    });
+    };
+    let { error } = await supabase.from("jobs").insert(jobRecord);
+    if (error && /last_verified_at|verification_failures/i.test(error.message)) {
+      const { last_verified_at, verification_failures, ...legacyJobRecord } = jobRecord;
+      void last_verified_at;
+      void verification_failures;
+      const legacyInsert = await supabase.from("jobs").insert(legacyJobRecord);
+      error = legacyInsert.error;
+    }
     if (error?.code === "23505") {
       const { data: concurrentJob } = await supabase
         .from("jobs")
@@ -281,23 +289,30 @@ async function saveMatchedJob({
     }
     if (!jobId) return { error: "Could not resolve the canonical job record." };
   } else {
-    await supabase
+    const updateRecord = {
+      title: job.title,
+      description: job.description,
+      locations: [job.location],
+      work_mode: job.workMode,
+      apply_url: canonicalUrl,
+      canonical_url: canonicalUrl,
+      fingerprint: identityFingerprint,
+      tags,
+      closed_at: null,
+      last_seen_at: now,
+      last_verified_at: now,
+      verification_failures: 0,
+    };
+    const updateResult = await supabase
       .from("jobs")
-      .update({
-        title: job.title,
-        description: job.description,
-        locations: [job.location],
-        work_mode: job.workMode,
-        apply_url: canonicalUrl,
-        canonical_url: canonicalUrl,
-        fingerprint: identityFingerprint,
-        tags,
-        closed_at: null,
-        last_seen_at: now,
-        last_verified_at: now,
-        verification_failures: 0,
-      })
+      .update(updateRecord)
       .eq("id", jobId);
+    if (updateResult.error && /last_verified_at|verification_failures/i.test(updateResult.error.message)) {
+      const { last_verified_at, verification_failures, ...legacyUpdateRecord } = updateRecord;
+      void last_verified_at;
+      void verification_failures;
+      await supabase.from("jobs").update(legacyUpdateRecord).eq("id", jobId);
+    }
   }
 
   const explanation = match.reasons.length

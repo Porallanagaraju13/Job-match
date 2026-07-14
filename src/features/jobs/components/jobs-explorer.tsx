@@ -103,6 +103,7 @@ export function JobsExplorer({
   const [feedbackByJob, setFeedbackByJob] = useState<Record<string, Job["feedback"]>>(() =>
     Object.fromEntries(jobs.map((job) => [job.id, job.feedback])),
   );
+  const [feedbackError, setFeedbackError] = useState("");
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [starting, setStarting] = useState(false);
   const completeness = profileScore(profile, hasResume);
@@ -178,6 +179,7 @@ export function JobsExplorer({
   async function sendFeedback(job: Job, feedback: "relevant" | "not_relevant" | "hidden") {
     const previous = feedbackByJob[job.id];
     setFeedbackByJob((current) => ({ ...current, [job.id]: feedback }));
+    setFeedbackError("");
     if (feedback !== "relevant") {
       setDismissedJobs((current) => new Set([...current, job.id]));
     }
@@ -188,6 +190,8 @@ export function JobsExplorer({
       body: JSON.stringify({ jobId: job.id, feedback }),
     });
     if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFeedbackError(payload?.error ?? "Job feedback requires the pending database migration.");
       setFeedbackByJob((current) => ({ ...current, [job.id]: previous }));
       setDismissedJobs((current) => {
         const next = new Set(current);
@@ -312,6 +316,11 @@ export function JobsExplorer({
             </div>
 
             <div className="mt-4 space-y-3">
+              {feedbackError && (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {feedbackError}
+                </p>
+              )}
               {visibleJobs.map((job) => {
                 const saved = isSaved(job.id);
                 return (
