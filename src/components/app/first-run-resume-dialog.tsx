@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 
 const allowedExtensions = [".pdf", ".doc", ".docx"];
-const maxSize = 5 * 1024 * 1024;
+const maxSize = 8 * 1024 * 1024;
 
 export function FirstRunResumeDialog({ open }: { open: boolean }) {
   const router = useRouter();
@@ -36,7 +36,7 @@ export function FirstRunResumeDialog({ open }: { open: boolean }) {
       return;
     }
     if (file.size > maxSize) {
-      setError("Resume files must be 5 MB or smaller.");
+      setError("Resume files must be 8 MB or smaller.");
       return;
     }
 
@@ -44,23 +44,27 @@ export function FirstRunResumeDialog({ open }: { open: boolean }) {
     setProcessing(true);
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch("/api/resumes", { method: "POST", body: formData });
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setError(payload?.error ?? "The resume could not be processed.");
-      setProcessing(false);
-      return;
-    }
+    try {
+      const response = await fetch("/api/resumes", { method: "POST", body: formData });
+      const payload = (await response.json().catch(() => null)) as { mode?: string; error?: string } | null;
+      if (!response.ok) {
+        setError(payload?.error ?? "The resume could not be processed. Please try again.");
+        setProcessing(false);
+        return;
+      }
 
-    const payload = (await response.json().catch(() => null)) as { mode?: string } | null;
-    if (payload?.mode === "demo") {
-      window.localStorage.setItem("jobmatch.demo-resume-ready", "true");
-      setDismissed(true);
+      if (payload?.mode === "demo") {
+        window.localStorage.setItem("jobmatch.demo-resume-ready", "true");
+        setDismissed(true);
+      }
+      window.setTimeout(() => {
+        router.push("/app/profile");
+        router.refresh();
+      }, 650);
+    } catch {
+      setError("The resume could not be uploaded. Check your connection and try again.");
+      setProcessing(false);
     }
-    window.setTimeout(() => {
-      router.push("/app/profile");
-      router.refresh();
-    }, 650);
   }
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
@@ -101,7 +105,7 @@ export function FirstRunResumeDialog({ open }: { open: boolean }) {
             <div>
               <UploadCloud className="mx-auto size-12" strokeWidth={1.6} />
               <p className="mt-5 text-lg font-semibold">Drop your resume here</p>
-              <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX, up to 5 MB</p>
+              <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX, up to 8 MB</p>
               <Button
                 variant="outline"
                 className="mt-5 bg-white"

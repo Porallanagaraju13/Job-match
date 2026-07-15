@@ -85,11 +85,13 @@ export function ResumeUploader() {
         for (let attempt = 0; attempt < 20; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, 750));
           const statusResponse = await fetch(`/api/resumes/${payload.id}/status`, { cache: "no-store" });
-          const statusPayload = (await statusResponse.json().catch(() => null)) as { status?: string } | null;
+          const statusPayload = (await statusResponse.json().catch(() => null)) as
+            | { status?: string; error?: string }
+            | null;
           setProgress(Math.min(88 + attempt, 98));
           if (statusPayload?.status === "review_required" || statusPayload?.status === "ready") break;
           if (statusPayload?.status === "failed") {
-            setError("AI enhancement failed. Your local draft is available for review.");
+            setError(statusPayload.error ?? "AI enhancement failed. Your local draft is available for review.");
             break;
           }
         }

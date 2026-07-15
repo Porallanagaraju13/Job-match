@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import type { ResumeRecord } from "@/server/resumes/repository";
 
 const allowedExtensions = [".pdf", ".doc", ".docx"];
-const maxSize = 5 * 1024 * 1024;
+const maxSize = 8 * 1024 * 1024;
 
 function formatBytes(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -41,7 +41,7 @@ export function ResumeManager({ initialResumes }: { initialResumes: ResumeRecord
       return;
     }
     if (file.size > maxSize) {
-      setError("Resume files must be 5 MB or smaller.");
+      setError("Resume files must be 8 MB or smaller.");
       return;
     }
 
@@ -49,14 +49,19 @@ export function ResumeManager({ initialResumes }: { initialResumes: ResumeRecord
     setUploading(true);
     const formData = new FormData();
     formData.append("file", file);
-    const response = await fetch("/api/resumes", { method: "POST", body: formData });
-    setUploading(false);
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      setError(payload?.error ?? "The resume could not be uploaded.");
-      return;
+    try {
+      const response = await fetch("/api/resumes", { method: "POST", body: formData });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        setError(payload?.error ?? "The resume could not be uploaded. Please try again.");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("The resume could not be uploaded. Check your connection and try again.");
+    } finally {
+      setUploading(false);
     }
-    router.refresh();
   }
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
@@ -110,7 +115,7 @@ export function ResumeManager({ initialResumes }: { initialResumes: ResumeRecord
             <div>
               <UploadCloud className="mx-auto size-12" strokeWidth={1.6} />
               <p className="mt-5 text-lg font-semibold">Drop your resume here</p>
-              <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX, up to 5 MB</p>
+              <p className="mt-1 text-sm text-muted-foreground">PDF or DOCX, up to 8 MB</p>
               <Button
                 variant="outline"
                 className="mt-5 bg-white"

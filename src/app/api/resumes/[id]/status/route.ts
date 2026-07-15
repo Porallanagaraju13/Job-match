@@ -20,11 +20,15 @@ export async function GET(
 
   const { data: resume, error } = await supabase
     .from("resumes")
-    .select("status, updated_at")
+    .select("status, updated_at, processing_error")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
   if (error || !resume) return NextResponse.json({ error: "Resume not found." }, { status: 404 });
 
-  return NextResponse.json({ status: resume.status, updatedAt: resume.updated_at });
+  return NextResponse.json({
+    status: resume.status,
+    updatedAt: resume.updated_at,
+    error: resume.processing_error,
+  });
 }
