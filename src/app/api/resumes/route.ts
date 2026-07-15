@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { inngest } from "@/server/inngest/client";
 import { parseUploadedResume, ResumeParsingError } from "@/server/resumes/parse-upload";
-import { createServerSupabaseClient } from "@/server/supabase/server";
+import { createServerSupabaseClient, createServiceRoleClient } from "@/server/supabase/server";
 
 const allowedMimeTypes = new Set([
   "application/pdf",
@@ -86,6 +86,13 @@ export async function POST(request: Request) {
       data: { user },
     } = await supabase.auth.getUser();
     if (!user) return NextResponse.json({ error: "Sign in before uploading a resume." }, { status: 401 });
+    const processingSupabase = createServiceRoleClient();
+    if (!processingSupabase) {
+      return NextResponse.json(
+        { error: "Resume processing service is not configured. Add SUPABASE_SECRET_KEY and try again." },
+        { status: 500 },
+      );
+    }
 
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { count: recentUploadCount } = await supabase
@@ -127,13 +134,13 @@ export async function POST(request: Request) {
     }
 
     try {
-      const { error: processingStateError } = await supabase
+      const { error: processingStateError } = await processingSupabase
         .from("profiles")
         .update({ onboarding_state: "processing" })
         .eq("id", user.id);
       if (processingStateError) throw processingStateError;
 
-      const { error: extractionError } = await supabase.from("resume_extractions").insert({
+      const { error: extractionError } = await processingSupabase.from("resume_extractions").insert({
         user_id: user.id,
         resume_id: resumeId,
         parser_version: "local-text-v2",
@@ -143,17 +150,18 @@ export async function POST(request: Request) {
       if (extractionError) throw extractionError;
 
       const { upsertProfileFromExtraction } = await import("@/server/profile/repository");
-      await upsertProfileFromExtraction(supabase, user.id, parsedResume.extraction);
+      await upsertProfileFromExtraction(processingSupabase, user.id, parsedResume.extraction);
     } catch (error) {
       console.error("Resume processing failed after upload", error);
       const processingError =
         "We uploaded the file, but could not finish extracting your profile. Please try again.";
       await Promise.allSettled([
-        supabase
+        processingSupabase
           .from("resumes")
           .update({ status: "failed", is_active: false, processing_error: processingError })
-          .eq("id", resumeId),
-        supabase.from("profiles").update({ onboarding_state: "resume_required" }).eq("id", user.id),
+          .eq("id", resumeId)
+          .eq("user_id", user.id),
+        processingSupabase.from("profiles").update({ onboarding_state: "resume_required" }).eq("id", user.id),
       ]);
       return NextResponse.json({ error: processingError, id: resumeId, status: "failed" }, { status: 500 });
     }
@@ -183,8 +191,12 @@ export async function POST(request: Request) {
 
     if (status === "review_required") {
       await Promise.all([
-        supabase.from("resumes").update({ status, processing_error: null }).eq("id", resumeId),
-        supabase.from("profiles").update({ onboarding_state: status }).eq("id", user.id),
+        processingSupabase
+          .from("resumes")
+          .update({ status, processing_error: null })
+          .eq("id", resumeId)
+          .eq("user_id", user.id),
+        processingSupabase.from("profiles").update({ onboarding_state: status }).eq("id", user.id),
       ]);
     }
 
