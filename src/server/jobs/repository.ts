@@ -3,6 +3,7 @@ import "server-only";
 
 import type { Job, WorkMode } from "@/lib/types";
 import { demoJobs } from "@/lib/demo-data";
+import { isIndiaLocation } from "@/server/jobs/india";
 import { createServerSupabaseClient } from "@/server/supabase/server";
 
 function relation<T>(value: unknown): T | null {
@@ -75,7 +76,7 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
     )
     .is("closed_at", null)
     .order("posted_at", { ascending: false, nullsFirst: false })
-    .limit(50);
+    .limit(150);
   if (error?.code === "42703") {
     const legacyResult = await supabase
       .from("jobs")
@@ -84,22 +85,25 @@ export async function getJobsForCurrentUser(): Promise<Job[]> {
       )
       .is("closed_at", null)
       .order("posted_at", { ascending: false, nullsFirst: false })
-      .limit(50);
+      .limit(150);
     rows = legacyResult.data?.map((row) => ({ ...row, last_verified_at: null })) ?? null;
     error = legacyResult.error;
   }
   if (error || !rows?.length) return demoJobs;
 
+  const indiaRows = rows.filter((row) => isIndiaLocation(firstLocation(row.locations)));
+  if (!indiaRows.length) return demoJobs;
+
   const { data: feedbackRows } = await supabase
     .from("job_feedback")
     .select("job_id, feedback")
     .eq("user_id", user.id)
-    .in("job_id", rows.map((row) => row.id));
+    .in("job_id", indiaRows.map((row) => row.id));
   const feedbackByJob = new Map(
     (feedbackRows ?? []).map((feedback) => [feedback.job_id, feedback.feedback as Job["feedback"]]),
   );
   const seen = new Set<string>();
-  const uniqueRows = rows
+  const uniqueRows = indiaRows
     .filter((row) => !["not_relevant", "hidden"].includes(feedbackByJob.get(row.id) ?? ""))
     .filter((row) => {
       const key = displayIdentity(row);
@@ -183,6 +187,7 @@ export async function getJobById(id: string): Promise<Job | null> {
     error = legacyResult.error;
   }
   if (error || !row) return demoJobs.find((job) => job.id === id) ?? null;
+  if (!isIndiaLocation(firstLocation(row.locations))) return null;
 
   const { data: matchRow } = await supabase
     .from("job_matches")

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { discoverDirectProviderJobs } from "@/server/jobs/direct-providers";
 import { discoverJobPages, type FirecrawlJobDiscoveryResult } from "@/server/jobs/firecrawl";
+import { indiaSearchLocation, isIndiaJob } from "@/server/jobs/india";
 import { inferWorkMode, type NormalizedSourceJob } from "@/server/jobs/source-adapter";
 import { scoreJob, type MatchProfile, type MatchResult } from "@/server/matching/score-job";
 import { inferTargetRoles } from "@/server/resumes/role-inference";
@@ -385,12 +386,13 @@ export async function fetchCloudJobsForUser(userId: string) {
   const workModes = stringArray(preferences?.work_modes);
   const seniorityLevels = stringArray(preferences?.seniority_levels);
   const roleQuery = profileTargetRoles[0] ?? asString(profile.headline, "Software Engineer");
-  const locationQuery =
-    preferredLocations[0] ?? (usesLegacyDemoProfile ? "Remote" : asString(profile.location, "Remote"));
+  const locationQuery = indiaSearchLocation(
+    preferredLocations[0] ?? (usesLegacyDemoProfile ? "India" : asString(profile.location, "India")),
+  );
   const matchProfile: MatchProfile = {
     skills: profileSkills,
     targetRoles: profileTargetRoles.length ? profileTargetRoles : [roleQuery],
-    preferredLocations: preferredLocations.length ? preferredLocations : [locationQuery],
+    preferredLocations: [locationQuery],
     workModes: workModes.length ? workModes : ["Remote", "Hybrid", "On-site"],
     seniorityLevels: seniorityLevels.length ? seniorityLevels : ["Senior", "Lead", "Mid"],
     minimumSalary:
@@ -421,7 +423,7 @@ export async function fetchCloudJobsForUser(userId: string) {
       providerJobs = dedupeProviderJobs([
         ...providerJobs,
         ...discoveries.map((discovery) => firecrawlToProviderJob(discovery, locationQuery)),
-      ]);
+      ]).filter(isIndiaJob);
     } catch {
       // Direct provider results are still useful; Firecrawl is only a fallback.
     }

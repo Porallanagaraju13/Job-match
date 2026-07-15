@@ -18,7 +18,7 @@ export function PreferencesForm() {
 
   const [modes, setModes] = useState<Array<(typeof workModes)[number]>>(["Remote", "Hybrid"]);
   const [loading, setLoading] = useState(false);
-  const [location, setLocation] = useState("San Francisco, CA");
+  const [location, setLocation] = useState("India");
   const [minimumSalary, setMinimumSalary] = useState("140000");
 
 

@@ -46,7 +46,7 @@ const preferencesSchema = z.object({
 export async function GET() {
   const defaultPreferences = {
     targetRoles: [] as string[],
-    preferredLocations: ["San Francisco, CA"],
+    preferredLocations: ["India"],
     workModes: ["Remote", "Hybrid"],
     seniorityLevels: ["Senior", "Lead"],
     minimumSalary: 140000,

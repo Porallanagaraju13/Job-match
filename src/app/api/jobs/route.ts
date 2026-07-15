@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { discoverDirectProviderJobs } from "@/server/jobs/direct-providers";
 import { GreenhouseAdapter } from "@/server/jobs/greenhouse";
+import { indiaSearchLocation, isIndiaJob } from "@/server/jobs/india";
 import { LeverAdapter } from "@/server/jobs/lever";
 import { scoreJob, type MatchProfile } from "@/server/matching/score-job";
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
 
   if (query) {
     try {
-      const location = url.searchParams.get("location") ?? "Remote";
+      const location = indiaSearchLocation(url.searchParams.get("location"));
       const skills = url.searchParams.get("skills")?.split(",").map((skill) => skill.trim()).filter(Boolean) ?? [];
       const jobs = await discoverDirectProviderJobs({
         roleQuery: query,
@@ -54,11 +55,11 @@ export async function GET(request: Request) {
 
   try {
     if (sourceKey && source === "greenhouse") {
-      const jobs = await new GreenhouseAdapter(company).listJobs(sourceKey);
+      const jobs = (await new GreenhouseAdapter(company).listJobs(sourceKey)).filter(isIndiaJob);
       return NextResponse.json({ mode: "live", jobs });
     }
     if (sourceKey && source === "lever") {
-      const jobs = await new LeverAdapter(company).listJobs(sourceKey);
+      const jobs = (await new LeverAdapter(company).listJobs(sourceKey)).filter(isIndiaJob);
       return NextResponse.json({ mode: "live", jobs });
     }
   } catch {

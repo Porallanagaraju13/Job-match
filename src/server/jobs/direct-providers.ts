@@ -1,6 +1,7 @@
 import "server-only";
 
 import { GreenhouseAdapter } from "@/server/jobs/greenhouse";
+import { isIndiaJob } from "@/server/jobs/india";
 import { LeverAdapter } from "@/server/jobs/lever";
 import { inferWorkMode, stripHtml, type NormalizedSourceJob } from "@/server/jobs/source-adapter";
 
@@ -226,6 +227,6 @@ export async function discoverDirectProviderJobs(search: ProviderSearch) {
     const key = `${job.source}:${job.externalId || job.applyUrl}`;
     if (seen.has(key)) return false;
     seen.add(key);
-    return Boolean(job.applyUrl && job.title);
+    return Boolean(job.applyUrl && job.title) && isIndiaJob(job);
   });
 }

@@ -17,7 +17,7 @@ export default async function JobsPage() {
         <div>
           <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">
             <BriefcaseBusiness className="size-4" />
-            Job search overview
+            India job search overview
           </p>
           <h1 className="mt-3 font-heading text-2xl font-semibold tracking-tight">
             Welcome back, {firstName}
@@ -37,7 +37,7 @@ export default async function JobsPage() {
           <div>
             <h2 className="font-heading text-3xl font-semibold tracking-tight">Jobs</h2>
             <p className="mt-1 text-base text-muted-foreground">
-              Review opportunities from your selected job platforms.
+              Review India-based opportunities from your selected job platforms.
             </p>
           </div>
           <SyncJobsButton />
