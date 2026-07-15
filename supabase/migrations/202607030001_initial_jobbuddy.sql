@@ -428,13 +428,15 @@ alter table public.subscriptions enable row level security;
 alter table public.usage_ledger enable row level security;
 alter table public.stripe_events enable row level security;
 alter table public.activity_events enable row level security;
-create policy "profiles_select_own" on public.profiles for
+drop policy if exists "profiles_policy_1" on public.profiles;
+create policy "profiles_policy_1" on public.profiles for
 select to authenticated using (
     (
       select auth.uid()
     ) = id
   );
-create policy "profiles_update_own" on public.profiles for
+drop policy if exists "profiles_policy_2" on public.profiles;
+create policy "profiles_policy_2" on public.profiles for
 update to authenticated using (
     (
       select auth.uid()
@@ -444,7 +446,8 @@ update to authenticated using (
       select auth.uid()
     ) = id
   );
-create policy "preferences_all_own" on public.job_preferences for all to authenticated using (
+drop policy if exists "job_preferences_policy_1" on public.job_preferences;
+create policy "job_preferences_policy_1" on public.job_preferences for all to authenticated using (
   (
     select auth.uid()
   ) = user_id
@@ -453,7 +456,8 @@ create policy "preferences_all_own" on public.job_preferences for all to authent
     select auth.uid()
   ) = user_id
 );
-create policy "skills_all_own" on public.profile_skills for all to authenticated using (
+drop policy if exists "profile_skills_policy_1" on public.profile_skills;
+create policy "profile_skills_policy_1" on public.profile_skills for all to authenticated using (
   (
     select auth.uid()
   ) = user_id
@@ -462,7 +466,8 @@ create policy "skills_all_own" on public.profile_skills for all to authenticated
     select auth.uid()
   ) = user_id
 );
-create policy "experiences_all_own" on public.experiences for all to authenticated using (
+drop policy if exists "experiences_policy_1" on public.experiences;
+create policy "experiences_policy_1" on public.experiences for all to authenticated using (
   (
     select auth.uid()
   ) = user_id
@@ -471,7 +476,8 @@ create policy "experiences_all_own" on public.experiences for all to authenticat
     select auth.uid()
   ) = user_id
 );
-create policy "educations_all_own" on public.educations for all to authenticated using (
+drop policy if exists "educations_policy_1" on public.educations;
+create policy "educations_policy_1" on public.educations for all to authenticated using (
   (
     select auth.uid()
   ) = user_id
@@ -480,19 +486,22 @@ create policy "educations_all_own" on public.educations for all to authenticated
     select auth.uid()
   ) = user_id
 );
-create policy "resumes_select_own" on public.resumes for
+drop policy if exists "resumes_policy_1" on public.resumes;
+create policy "resumes_policy_1" on public.resumes for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "resumes_insert_own" on public.resumes for
+drop policy if exists "resumes_policy_2" on public.resumes;
+create policy "resumes_policy_2" on public.resumes for
 insert to authenticated with check (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "resumes_update_own" on public.resumes for
+drop policy if exists "resumes_policy_3" on public.resumes;
+create policy "resumes_policy_3" on public.resumes for
 update to authenticated using (
     (
       select auth.uid()
@@ -502,33 +511,41 @@ update to authenticated using (
       select auth.uid()
     ) = user_id
   );
-create policy "resumes_delete_own" on public.resumes for delete to authenticated using (
+drop policy if exists "resumes_policy_4" on public.resumes;
+create policy "resumes_policy_4" on public.resumes for delete to authenticated using (
   (
     select auth.uid()
   ) = user_id
 );
-create policy "resume_extractions_select_own" on public.resume_extractions for
+drop policy if exists "resume_extractions_policy_1" on public.resume_extractions;
+create policy "resume_extractions_policy_1" on public.resume_extractions for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "companies_read_authenticated" on public.companies for
+drop policy if exists "companies_policy_1" on public.companies;
+create policy "companies_policy_1" on public.companies for
 select to authenticated using (true);
-create policy "sources_read_authenticated" on public.job_sources for
+drop policy if exists "job_sources_policy_1" on public.job_sources;
+create policy "job_sources_policy_1" on public.job_sources for
 select to authenticated using (status = 'active');
-create policy "jobs_read_authenticated" on public.jobs for
+drop policy if exists "jobs_policy_1" on public.jobs;
+create policy "jobs_policy_1" on public.jobs for
 select to authenticated using (true);
-create policy "plans_read" on public.plans for
+drop policy if exists "plans_policy_1" on public.plans;
+create policy "plans_policy_1" on public.plans for
 select to anon,
   authenticated using (active);
-create policy "matches_select_own" on public.job_matches for
+drop policy if exists "job_matches_policy_1" on public.job_matches;
+create policy "job_matches_policy_1" on public.job_matches for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "saved_jobs_all_own" on public.saved_jobs for all to authenticated using (
+drop policy if exists "saved_jobs_policy_1" on public.saved_jobs;
+create policy "saved_jobs_policy_1" on public.saved_jobs for all to authenticated using (
   (
     select auth.uid()
   ) = user_id
@@ -537,19 +554,22 @@ create policy "saved_jobs_all_own" on public.saved_jobs for all to authenticated
     select auth.uid()
   ) = user_id
 );
-create policy "applications_select_own" on public.applications for
+drop policy if exists "applications_policy_1" on public.applications;
+create policy "applications_policy_1" on public.applications for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "applications_insert_own" on public.applications for
+drop policy if exists "applications_policy_2" on public.applications;
+create policy "applications_policy_2" on public.applications for
 insert to authenticated with check (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "applications_update_own" on public.applications for
+drop policy if exists "applications_policy_3" on public.applications;
+create policy "applications_policy_3" on public.applications for
 update to authenticated using (
     (
       select auth.uid()
@@ -559,19 +579,22 @@ update to authenticated using (
       select auth.uid()
     ) = user_id
   );
-create policy "application_answers_select_own" on public.application_answers for
+drop policy if exists "application_answers_policy_1" on public.application_answers;
+create policy "application_answers_policy_1" on public.application_answers for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "application_answers_insert_own" on public.application_answers for
+drop policy if exists "application_answers_policy_2" on public.application_answers;
+create policy "application_answers_policy_2" on public.application_answers for
 insert to authenticated with check (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "application_answers_update_own" on public.application_answers for
+drop policy if exists "application_answers_policy_3" on public.application_answers;
+create policy "application_answers_policy_3" on public.application_answers for
 update to authenticated using (
     (
       select auth.uid()
@@ -581,31 +604,36 @@ update to authenticated using (
       select auth.uid()
     ) = user_id
   );
-create policy "application_events_select_own" on public.application_events for
+drop policy if exists "application_events_policy_1" on public.application_events;
+create policy "application_events_policy_1" on public.application_events for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "application_artifacts_select_own" on public.application_artifacts for
+drop policy if exists "application_artifacts_policy_1" on public.application_artifacts;
+create policy "application_artifacts_policy_1" on public.application_artifacts for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "subscriptions_select_own" on public.subscriptions for
+drop policy if exists "subscriptions_policy_1" on public.subscriptions;
+create policy "subscriptions_policy_1" on public.subscriptions for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "usage_select_own" on public.usage_ledger for
+drop policy if exists "usage_ledger_policy_1" on public.usage_ledger;
+create policy "usage_ledger_policy_1" on public.usage_ledger for
 select to authenticated using (
     (
       select auth.uid()
     ) = user_id
   );
-create policy "activity_select_own" on public.activity_events for
+drop policy if exists "activity_events_policy_1" on public.activity_events;
+create policy "activity_events_policy_1" on public.activity_events for
 select to authenticated using (
     (
       select auth.uid()
@@ -633,21 +661,24 @@ update
 set public = false,
   file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
-create policy "resume_objects_select_own" on storage.objects for
+drop policy if exists "objects_policy_1" on storage.objects;
+create policy "objects_policy_1" on storage.objects for
 select to authenticated using (
     bucket_id = 'resumes'
     and (storage.foldername(name)) [1] = (
       select auth.uid()
     )::text
   );
-create policy "resume_objects_insert_own" on storage.objects for
+drop policy if exists "objects_policy_2" on storage.objects;
+create policy "objects_policy_2" on storage.objects for
 insert to authenticated with check (
     bucket_id = 'resumes'
     and (storage.foldername(name)) [1] = (
       select auth.uid()
     )::text
   );
-create policy "resume_objects_update_own" on storage.objects for
+drop policy if exists "objects_policy_3" on storage.objects;
+create policy "objects_policy_3" on storage.objects for
 update to authenticated using (
     bucket_id = 'resumes'
     and (storage.foldername(name)) [1] = (
@@ -659,35 +690,209 @@ update to authenticated using (
       select auth.uid()
     )::text
   );
-create policy "resume_objects_delete_own" on storage.objects for delete to authenticated using (
+drop policy if exists "objects_policy_4" on storage.objects;
+create policy "objects_policy_4" on storage.objects for delete to authenticated using (
   bucket_id = 'resumes'
   and (storage.foldername(name)) [1] = (
     select auth.uid()
   )::text
 );
--- 1. Enable pgvector
+
+-- Production job identity, freshness, and user relevance feedback.
 create extension if not exists vector;
--- 2. Add embeddings to jobs table
-alter table public.jobs
-add column if not exists embedding vector(768);
-create index if not exists jobs_embedding_idx on public.jobs using hnsw (embedding vector_cosine_ops);
--- 3. Add embeddings to resume_extractions
-alter table public.resume_extractions
-add column if not exists embedding vector(768);
--- 4. Enable realtime on applications table for WebSockets
-alter publication supabase_realtime
-add table public.applications;
--- 5. Create match function for semantic job matching
-create or replace function match_jobs (
-    query_embedding vector(768),
-    match_threshold float,
-    match_count int
-  ) returns table (id uuid, similarity float) language sql stable as $$
-select jobs.id,
-  1 - (jobs.embedding <=> query_embedding) as similarity
-from public.jobs
-where 1 - (jobs.embedding <=> query_embedding) > match_threshold
-  and jobs.closed_at is null
-order by jobs.embedding <=> query_embedding
-limit match_count;
+
+alter table public.jobs add column if not exists embedding vector(768);
+alter table public.resume_extractions add column if not exists embedding vector(768);
+create index if not exists jobs_embedding_idx
+  on public.jobs using hnsw (embedding vector_cosine_ops);
+
+create or replace function public.match_jobs(
+  query_embedding vector(768),
+  match_threshold double precision default 0.55,
+  match_count integer default 20
+)
+returns table (id uuid, similarity double precision)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select jobs.id, 1 - (jobs.embedding operator(public.<=>) query_embedding) as similarity
+  from public.jobs as jobs
+  where jobs.embedding is not null
+    and jobs.closed_at is null
+    and 1 - (jobs.embedding operator(public.<=>) query_embedding) >= match_threshold
+  order by jobs.embedding operator(public.<=>) query_embedding
+  limit greatest(1, least(match_count, 100));
 $$;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'applications'
+  ) then
+    alter publication supabase_realtime add table public.applications;
+  end if;
+end;
+$$;
+
+alter table public.jobs
+  add column if not exists last_verified_at timestamptz not null default now(),
+  add column if not exists verification_failures integer not null default 0;
+
+-- Rebuild historical fingerprints from stable job attributes so the same
+-- opening collected from multiple providers shares one identity.
+update public.jobs as job
+set fingerprint = encode(
+  digest(
+    concat_ws(
+      '|',
+      lower(regexp_replace(coalesce(company.normalized_name, ''), '[^a-z0-9]+', '', 'g')),
+      lower(regexp_replace(coalesce(job.normalized_title, job.title), '[^a-z0-9]+', '', 'g')),
+      lower(regexp_replace(coalesce(job.locations ->> 0, ''), '[^a-z0-9]+', '', 'g'))
+    ),
+    'sha256'
+  ),
+  'hex'
+)
+from public.companies as company
+where company.id = job.company_id;
+
+create temporary table job_duplicate_map on commit drop as
+select id as duplicate_id, keeper_id
+from (
+  select
+    id,
+    first_value(id) over (partition by fingerprint order by created_at, id) as keeper_id
+  from public.jobs
+  where fingerprint <> ''
+) ranked
+where id <> keeper_id;
+
+insert into public.job_matches (user_id, job_id, score, components, explanation, calculated_at)
+select distinct on (match.user_id, duplicate.keeper_id)
+  match.user_id,
+  duplicate.keeper_id,
+  match.score,
+  match.components,
+  match.explanation,
+  match.calculated_at
+from public.job_matches as match
+join job_duplicate_map as duplicate on duplicate.duplicate_id = match.job_id
+order by match.user_id, duplicate.keeper_id, match.score desc, match.calculated_at desc
+on conflict (user_id, job_id) do update
+set score = greatest(public.job_matches.score, excluded.score),
+    components = case
+      when excluded.score >= public.job_matches.score then excluded.components
+      else public.job_matches.components
+    end,
+    explanation = case
+      when excluded.score >= public.job_matches.score then excluded.explanation
+      else public.job_matches.explanation
+    end,
+    calculated_at = greatest(public.job_matches.calculated_at, excluded.calculated_at);
+
+delete from public.job_matches as match
+using job_duplicate_map as duplicate
+where match.job_id = duplicate.duplicate_id;
+
+insert into public.saved_jobs (user_id, job_id, saved_at)
+select saved.user_id, duplicate.keeper_id, saved.saved_at
+from public.saved_jobs as saved
+join job_duplicate_map as duplicate on duplicate.duplicate_id = saved.job_id
+on conflict (user_id, job_id) do nothing;
+
+delete from public.saved_jobs as saved
+using job_duplicate_map as duplicate
+where saved.job_id = duplicate.duplicate_id;
+
+update public.applications as application
+set job_id = duplicate.keeper_id
+from job_duplicate_map as duplicate
+where application.job_id = duplicate.duplicate_id;
+
+delete from public.jobs as job
+using job_duplicate_map as duplicate
+where job.id = duplicate.duplicate_id;
+
+drop index if exists public.jobs_fingerprint_idx;
+create unique index if not exists jobs_fingerprint_unique_idx
+  on public.jobs(fingerprint)
+  where fingerprint <> '';
+create index if not exists jobs_freshness_idx
+  on public.jobs(last_verified_at desc)
+  where closed_at is null;
+
+create table if not exists public.job_feedback (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  job_id uuid not null references public.jobs(id) on delete cascade,
+  feedback text not null check (feedback in ('relevant', 'not_relevant', 'hidden')),
+  reason text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, job_id)
+);
+
+drop trigger if exists set_job_feedback_updated_at on public.job_feedback;
+create trigger set_job_feedback_updated_at
+before update on public.job_feedback
+for each row execute function public.set_updated_at();
+
+alter table public.job_feedback enable row level security;
+drop policy if exists "job_feedback_policy_1" on public.job_feedback;
+create policy "job_feedback_policy_1" on public.job_feedback
+for all to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+
+create index if not exists job_feedback_user_value_idx
+  on public.job_feedback(user_id, feedback, updated_at desc);
+
+create table if not exists public.user_privacy_settings (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  retain_automation_recordings boolean not null default true,
+  improve_personal_matching boolean not null default true,
+  resume_retention_days integer not null default 365 check (resume_retention_days between 30 and 3650),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists set_user_privacy_settings_updated_at on public.user_privacy_settings;
+create trigger set_user_privacy_settings_updated_at
+before update on public.user_privacy_settings
+for each row execute function public.set_updated_at();
+
+alter table public.user_privacy_settings enable row level security;
+drop policy if exists "user_privacy_settings_policy_1" on public.user_privacy_settings;
+create policy "user_privacy_settings_policy_1" on public.user_privacy_settings
+for all to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
+
+create table if not exists public.application_notes (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  application_id uuid not null references public.applications(id) on delete cascade,
+  content text not null check (char_length(content) between 1 and 2000),
+  follow_up_at timestamptz,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists application_notes_user_followup_idx
+  on public.application_notes(user_id, follow_up_at, created_at desc);
+drop trigger if exists set_application_notes_updated_at on public.application_notes;
+create trigger set_application_notes_updated_at
+before update on public.application_notes
+for each row execute function public.set_updated_at();
+
+alter table public.application_notes enable row level security;
+drop policy if exists "application_notes_policy_1" on public.application_notes;
+create policy "application_notes_policy_1" on public.application_notes
+for all to authenticated
+using ((select auth.uid()) = user_id)
+with check ((select auth.uid()) = user_id);
