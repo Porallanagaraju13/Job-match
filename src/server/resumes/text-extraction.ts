@@ -1,5 +1,8 @@
 import "server-only";
 
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import mammoth from "mammoth";
 import { PDFParse } from "pdf-parse";
@@ -41,9 +44,17 @@ function printableText(bytes: Uint8Array) {
     .replace(/[ \t\f\v]+/g, " ");
 }
 
+function configurePdfWorker() {
+  const workerPath = join(process.cwd(), "node_modules", "pdf-parse", "dist", "worker", "pdf.worker.mjs");
+  if (existsSync(workerPath)) {
+    PDFParse.setWorker(pathToFileURL(workerPath).href);
+  }
+}
+
 async function extractPdfText(bytes: Uint8Array) {
   let parser: PDFParse | null = null;
   try {
+    configurePdfWorker();
     parser = new PDFParse({ data: new Uint8Array(Buffer.from(bytes)) });
     const result = await parser.getText();
     const pageText = result.pages.map((page) => page.text).filter(Boolean).join("\n\n");
