@@ -54,6 +54,7 @@ export function ApplicationList({
     salary: "",
     negotiation: "",
   });
+  const [autofillError, setAutofillError] = useState("");
 
   useEffect(() => {
     if (!startedId) return;
@@ -137,6 +138,7 @@ export function ApplicationList({
   async function autofill() {
     if (!missingFor) return;
     setAutofilling(true);
+    setAutofillError("");
     try {
       const response = await fetch("/api/applications/autofill", {
         method: "POST",
@@ -149,17 +151,22 @@ export function ApplicationList({
           })),
         }),
       });
+      
+      const data = await response.json();
+      
       if (response.ok) {
-        const data = await response.json();
         setAnswers({
           english: data.english || "",
           shift: data.shift || "",
           salary: data.salary || "",
           negotiation: data.negotiation || "",
         });
+      } else {
+        setAutofillError(data.error || "Failed to autofill using AI. Please try again.");
       }
     } catch (error) {
       console.error("Failed to autofill:", error);
+      setAutofillError("A network error occurred while autofilling.");
     } finally {
       setAutofilling(false);
     }
@@ -253,6 +260,12 @@ export function ApplicationList({
             )}
             Fill with AI
           </Button>
+
+          {autofillError && (
+            <div className="mt-2 text-sm text-red-500 font-medium bg-red-50 p-2 rounded-md border border-red-200">
+              {autofillError}
+            </div>
+          )}
 
           <div className="mt-3 space-y-5">
             <div className="space-y-2">
