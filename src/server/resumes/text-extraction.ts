@@ -53,7 +53,7 @@ function configurePdfWorker(PDFParse: any) {
 async function extractPdfText(bytes: Uint8Array) {
   let parser: any = null;
   try {
-    const PDFParse = require("pdf-parse");
+    const { PDFParse } = await import("pdf-parse");
     configurePdfWorker(PDFParse);
     parser = new PDFParse({ data: new Uint8Array(Buffer.from(bytes)) });
     const result = await parser.getText();
@@ -61,8 +61,7 @@ async function extractPdfText(bytes: Uint8Array) {
     const text = cleanExtractedText(pageText || result.text);
     return text;
   } catch (err) {
-    console.error("PDF parsing failed", err);
-    // Return empty string on failure instead of garbled text
+    console.error("PDF parsing failed:", err);
     return "";
   } finally {
     if (parser) await parser.destroy().catch(() => undefined);
