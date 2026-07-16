@@ -4,6 +4,8 @@ import { inngest } from "@/server/inngest/client";
 import { parseUploadedResume, ResumeParsingError } from "@/server/resumes/parse-upload";
 import { createServerSupabaseClient, createServiceRoleClient } from "@/server/supabase/server";
 
+export const runtime = "nodejs";
+
 const allowedMimeTypes = new Set([
   "application/pdf",
   "application/msword",
