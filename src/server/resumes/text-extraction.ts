@@ -53,7 +53,7 @@ function configurePdfWorker(PDFParse: any) {
 async function extractPdfText(bytes: Uint8Array) {
   let parser: any = null;
   try {
-    const PDFParse = require("pdf-parse");
+    const { PDFParse } = require("pdf-parse");
     configurePdfWorker(PDFParse);
     parser = new PDFParse({ data: new Uint8Array(Buffer.from(bytes)) });
     const result = await parser.getText();
