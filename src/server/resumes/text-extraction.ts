@@ -57,7 +57,7 @@ async function extractPdfText(bytes: Uint8Array) {
     configurePdfWorker(PDFParse);
     parser = new PDFParse({ data: new Uint8Array(Buffer.from(bytes)) });
     const result = await parser.getText();
-    const pageText = result.pages.map((page) => page.text).filter(Boolean).join("\n\n");
+    const pageText = result.pages.map((page: any) => page.text).filter(Boolean).join("\n\n");
     const text = cleanExtractedText(pageText || result.text);
     return text;
   } catch (err) {
